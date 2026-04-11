@@ -1,0 +1,38 @@
+import { pool } from './pool.js';
+import type { Subscription } from '../types.js';
+
+export async function findByEmailAndRepo(
+  email: string,
+  repo: string,
+): Promise<Subscription | null> {
+  const result = await pool.query<Subscription>(
+    'SELECT * FROM subscriptions WHERE email = $1 AND repo = $2',
+    [email, repo],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function insertSubscription(
+  email: string,
+  repo: string,
+  confirmToken: string,
+  unsubscribeToken: string,
+): Promise<Subscription> {
+  const result = await pool.query<Subscription>(
+    `INSERT INTO subscriptions (email, repo, confirm_token, unsubscribe_token)
+     VALUES ($1, $2, $3, $4)
+     RETURNING *`,
+    [email, repo, confirmToken, unsubscribeToken],
+  );
+  return result.rows[0]!;
+}
+
+export async function updateConfirmToken(
+  id: number,
+  confirmToken: string,
+): Promise<void> {
+  await pool.query(
+    'UPDATE subscriptions SET confirm_token = $1 WHERE id = $2',
+    [confirmToken, id],
+  );
+}
