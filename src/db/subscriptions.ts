@@ -36,3 +36,18 @@ export async function updateConfirmToken(
     [confirmToken, id],
   );
 }
+
+export async function findByConfirmToken(token: string): Promise<Subscription | null> {
+  const result = await pool.query<Subscription>(
+    'SELECT * FROM subscriptions WHERE confirm_token = $1',
+    [token],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function markConfirmed(id: number): Promise<void> {
+  await pool.query(
+    'UPDATE subscriptions SET confirmed = true WHERE id = $1',
+    [id],
+  );
+}

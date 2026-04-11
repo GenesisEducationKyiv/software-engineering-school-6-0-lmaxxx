@@ -4,7 +4,9 @@ import { checkRepoExists } from './github.js';
 import { sendConfirmationEmail } from './email.js';
 import {
   findByEmailAndRepo,
+  findByConfirmToken,
   insertSubscription,
+  markConfirmed,
   updateConfirmToken,
 } from '../db/subscriptions.js';
 import { upsertRepository } from '../db/repositories.js';
@@ -43,4 +45,15 @@ export async function createSubscription(email: string, repo: string): Promise<v
   await insertSubscription(email, repo, confirmToken, unsubscribeToken);
   await upsertRepository(repo);
   await sendConfirmationEmail(email, repo, confirmToken);
+}
+
+export async function confirmSubscription(token: string): Promise<void> {
+  const sub = await findByConfirmToken(token);
+  if (!sub) {
+    throw new AppError(404, 'Confirmation token not found');
+  }
+  if (sub.confirmed) {
+    throw new AppError(400, 'Subscription already confirmed');
+  }
+  await markConfirmed(sub.id);
 }
