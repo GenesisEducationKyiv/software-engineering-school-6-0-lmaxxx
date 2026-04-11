@@ -63,3 +63,11 @@ export async function findByUnsubscribeToken(token: string): Promise<Subscriptio
 export async function deleteSubscription(id: number): Promise<void> {
   await pool.query('DELETE FROM subscriptions WHERE id = $1', [id]);
 }
+
+export async function findConfirmedByEmail(email: string): Promise<Subscription[]> {
+  const result = await pool.query<Subscription>(
+    'SELECT * FROM subscriptions WHERE email = $1 AND confirmed = true',
+    [email],
+  );
+  return result.rows;
+}
