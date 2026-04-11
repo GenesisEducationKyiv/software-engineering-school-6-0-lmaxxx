@@ -1,0 +1,31 @@
+import 'dotenv/config';
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+}
+
+function optional(name: string, fallback: string): string {
+  return process.env[name] ?? fallback;
+}
+
+export const config = {
+  port: parseInt(optional('PORT', '3000'), 10),
+  nodeEnv: optional('NODE_ENV', 'development'),
+
+  databaseUrl: required('DATABASE_URL'),
+
+  githubToken: process.env['GITHUB_TOKEN'] ?? null,
+
+  smtp: {
+    host: optional('SMTP_HOST', 'smtp.gmail.com'),
+    port: parseInt(optional('SMTP_PORT', '587'), 10),
+    user: optional('SMTP_USER', ''),
+    pass: optional('SMTP_PASS', ''),
+  },
+
+  scanIntervalMs: parseInt(optional('SCAN_INTERVAL_MS', '300000'), 10),
+
+  baseUrl: optional('BASE_URL', 'http://localhost:3000'),
+} as const;

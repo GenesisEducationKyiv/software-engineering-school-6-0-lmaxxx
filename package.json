@@ -1,0 +1,40 @@
+{
+  "name": "github-notifier",
+  "version": "1.0.0",
+  "description": "GitHub release notification service",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/",
+    "migrate": "node-pg-migrate"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-pg-migrate": "^7.3.2",
+    "nodemailer": "^6.9.14",
+    "pg": "^8.12.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.10",
+    "@types/nodemailer": "^6.4.15",
+    "@types/pg": "^8.11.6",
+    "@types/supertest": "^6.0.2",
+    "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^1.6.0",
+    "eslint": "^9.7.0",
+    "supertest": "^7.0.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3",
+    "vitest": "^1.6.0"
+  }
+}
