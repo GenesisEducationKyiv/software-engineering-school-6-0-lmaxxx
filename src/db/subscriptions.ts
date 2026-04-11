@@ -51,3 +51,15 @@ export async function markConfirmed(id: number): Promise<void> {
     [id],
   );
 }
+
+export async function findByUnsubscribeToken(token: string): Promise<Subscription | null> {
+  const result = await pool.query<Subscription>(
+    'SELECT * FROM subscriptions WHERE unsubscribe_token = $1',
+    [token],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function deleteSubscription(id: number): Promise<void> {
+  await pool.query('DELETE FROM subscriptions WHERE id = $1', [id]);
+}

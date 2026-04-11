@@ -5,9 +5,11 @@ import { sendConfirmationEmail } from './email.js';
 import {
   findByEmailAndRepo,
   findByConfirmToken,
+  findByUnsubscribeToken,
   insertSubscription,
   markConfirmed,
   updateConfirmToken,
+  deleteSubscription,
 } from '../db/subscriptions.js';
 import { upsertRepository } from '../db/repositories.js';
 
@@ -56,4 +58,12 @@ export async function confirmSubscription(token: string): Promise<void> {
     throw new AppError(400, 'Subscription already confirmed');
   }
   await markConfirmed(sub.id);
+}
+
+export async function unsubscribeUser(token: string): Promise<void> {
+  const sub = await findByUnsubscribeToken(token);
+  if (!sub) {
+    throw new AppError(404, 'Subscription not found');
+  }
+  await deleteSubscription(sub.id);
 }
