@@ -8,7 +8,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email } = req.query;
     if (!email || typeof email !== 'string' || email.trim() === '') {
-      throw new AppError('Missing or invalid email', 400);
+      throw new AppError(400, 'Missing or invalid email');
     }
     const subscriptions = await findConfirmedByEmail(email.trim());
     res.json(subscriptions);

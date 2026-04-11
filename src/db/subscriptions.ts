@@ -71,3 +71,11 @@ export async function findConfirmedByEmail(email: string): Promise<Subscription[
   );
   return result.rows;
 }
+
+export async function getConfirmedSubscribers(repo: string): Promise<Subscription[]> {
+  const result = await pool.query<Subscription>(
+    'SELECT * FROM subscriptions WHERE repo = $1 AND confirmed = true',
+    [repo],
+  );
+  return result.rows;
+}
