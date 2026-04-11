@@ -2,6 +2,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { runner as migrate } from 'node-pg-migrate';
 import { config } from './config.js';
+import { app } from './app.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,7 +16,9 @@ async function main() {
     log: console.log,
   });
 
-  console.log('Migrations applied. Server ready.');
+  app.listen(config.port, () => {
+    console.log(`Server listening on port ${config.port}`);
+  });
 }
 
 main().catch((err) => {
