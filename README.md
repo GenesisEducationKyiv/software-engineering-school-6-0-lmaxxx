@@ -1,29 +1,61 @@
 # GitHub Release Notification API
 
-A monolithic Node.js service that lets users subscribe to email notifications when a GitHub repository publishes a new release. Three components run in a single process: an **API** (REST endpoints), a **Scanner** (periodic GitHub poller), and a **Notifier** (email sender via SMTP).
+Subscribe an email address to GitHub repository releases. When a new release is published, confirmed subscribers receive an email notification.
+
+Three components run in a **single Node.js process**: an **API** (Express REST), a **Scanner** (periodic GitHub poller), and a **Notifier** (transactional email via SMTP).
+
+> **Live Preview:** [Frontend UI](https://github-notifier-production-f138.up.railway.app/)
+>
+> **⚠️ Current Status:** The frontend UI is deployed, but the backend logic is currently disabled. The project is built using a multi-container `docker-compose` architecture, and finding an affordable/free hosting platform that natively supports `docker-compose` (rather than a single `Dockerfile`) is an ongoing challenge.
 
 ---
 
-## Architecture
+## How It Works
+
+### Subscription Flow
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  Single Process                  │
-│                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────┐  │
-│  │   API    │  │ Scanner  │  │   Notifier    │  │
-│  │ (Express)│  │(setInterval)│  │ (Nodemailer) │  │
-│  └────┬─────┘  └────┬─────┘  └───────┬───────┘  │
-│       │              │                │           │
-└───────┼──────────────┼────────────────┼───────────┘
-        │              │                │
-        ▼              ▼                ▼
-   PostgreSQL      GitHub API        SMTP Server
+1. User fills in email + repo on the web UI (GET /)
+   └─► POST /api/subscribe
+         ├─ validate email format and "owner/repo" pattern
+         ├─ check repo exists on GitHub API  (result cached in Redis)
+         ├─ insert unconfirmed row into subscriptions table
+         └─ send confirmation email  ──► link to GET /api/confirm/:token
+
+2. User clicks the confirmation link
+   └─► GET /api/confirm/:token
+         └─ mark subscription confirmed in DB
+              └─► release notifications now active
 ```
 
-- **API** handles subscription lifecycle (subscribe, confirm, unsubscribe, list).
-- **Scanner** runs every 5 minutes (configurable), fetches the latest release for each subscribed repo, and triggers notifications when a new tag is detected.
-- **Notifier** sends transactional emails: confirmation links and release alerts.
+### Scanner Cycle
+
+Runs on a `setInterval` (default every 5 minutes, controlled by `SCAN_INTERVAL_MS`).
+
+```
+setInterval fires
+  └─ query repos WHERE confirmed subscriptions exist
+       └─ for each repo:
+            ├─ GET /repos/:owner/:repo/releases/latest  (Redis cached, default 10 min TTL)
+            ├─ if tag_name ≠ last_seen_tag in DB:
+            │    ├─ UPDATE repositories SET last_seen_tag = <new tag>
+            │    └─ for each confirmed subscriber:
+            │         └─ send release notification email (includes unsubscribe link)
+            └─ if GitHub returns 429 → break loop, retry on next interval
+  └─ increment scans_total Prometheus counter
+```
+
+### Startup Sequence
+
+`src/index.ts` runs these steps in order before accepting traffic:
+
+```
+1. Run DB migrations (node-pg-migrate, auto-applied on every start)
+2. Start HTTP server on PORT
+3. Start scanner setInterval
+4. Start gRPC server on GRPC_PORT
+5. Register SIGTERM / SIGINT handlers for graceful shutdown
+```
 
 ---
 
@@ -31,94 +63,38 @@ A monolithic Node.js service that lets users subscribe to email notifications wh
 
 ```bash
 cp .env.example .env
-# Edit .env if needed (defaults work with docker-compose)
-
+# Optionally set GITHUB_TOKEN in .env to raise rate limit to 5000 req/hr
 docker-compose up
 ```
 
-The API is available at `http://localhost:3000`.  
-Mailhog (local email UI) is at `http://localhost:8025`.
+| URL | What's there |
+|-----|-------------|
+| http://localhost:3000 | Web UI and REST API |
+| http://localhost:8025 | Mailhog — inspect emails sent during development |
+| http://localhost:8080 | Swagger UI — interactive API docs |
+
+All services start automatically. PostgreSQL migrations run on app startup before the server accepts connections.
 
 ---
 
-## Manual Setup
+## Local Development Setup
 
-**Prerequisites:** Node.js 20+, PostgreSQL
+**Prerequisites:** Node.js 20+, PostgreSQL, (optional) Redis
 
 ```bash
-# Install dependencies
+# 1. Install dependencies
 npm install
 
-# Configure environment
+# 2. Configure environment
 cp .env.example .env
-# Edit .env with your database and SMTP credentials
+# Edit .env — set DATABASE_URL, SMTP_HOST, SMTP_PORT, BASE_URL at minimum
 
-# Run database migrations
-DATABASE_URL=<your-url> npm run migrate up
+# 3. Run database migrations
+npm run migrate up
 
-# Start development server
+# 4. Start with hot reload
 npm run dev
 ```
-
----
-
-## Environment Variables
-
-See `.env.example` for all variables with descriptions.
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `PORT` | No | `3000` | HTTP server port |
-| `DATABASE_URL` | Yes | — | PostgreSQL connection URL |
-| `GITHUB_TOKEN` | No | — | GitHub PAT (raises rate limit to 5000 req/hr) |
-| `SMTP_HOST` | Yes | — | SMTP server hostname |
-| `SMTP_PORT` | Yes | — | SMTP server port |
-| `SMTP_USER` | Yes | — | SMTP username |
-| `SMTP_PASS` | Yes | — | SMTP password |
-| `SCAN_INTERVAL_MS` | No | `300000` | Scanner interval in milliseconds (5 min) |
-| `BASE_URL` | Yes | — | Public base URL for email links |
-
----
-
-## API Endpoints
-
-Full spec: [`swagger.yaml`](./swagger.yaml)
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/subscribe` | Subscribe an email to a repo's releases |
-| `GET` | `/api/confirm/:token` | Confirm a subscription via email link |
-| `GET` | `/api/unsubscribe/:token` | Unsubscribe via token in notification emails |
-| `GET` | `/api/subscriptions?email=` | List confirmed subscriptions for an email |
-
-### Example
-
-```bash
-# Subscribe
-curl -X POST http://localhost:3000/api/subscribe \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"you@example.com","repo":"golang/go"}'
-
-# List subscriptions
-curl 'http://localhost:3000/api/subscriptions?email=you@example.com'
-```
-
----
-
-## Running Tests
-
-```bash
-# Run all unit tests
-npm test
-
-# Watch mode
-npm run test:watch
-
-# Coverage report
-npm run test:coverage
-```
-
-Tests use [Vitest](https://vitest.dev/) with all external dependencies mocked (`vi.mock()`). There are three test suites: subscription service, GitHub service, and scanner logic.
 
 ---
 
@@ -126,24 +102,32 @@ Tests use [Vitest](https://vitest.dev/) with all external dependencies mocked (`
 
 ```
 src/
-├── index.ts              # Entry: migrations → server → scanner
+├── index.ts              # Entry: migrations → server → scanner → gRPC
 ├── app.ts                # Express app, routes, middleware
-├── config.ts             # Env var loading
+├── config.ts             # Env var loading and validation
 ├── types.ts              # Shared TypeScript interfaces
-├── routes/               # Route handlers (one file per endpoint)
+├── metrics.ts            # Prometheus counters and histograms
+├── routes/               # One file per endpoint
 ├── services/
-│   ├── github.ts         # GitHub API client
+│   ├── github.ts         # GitHub API client (with Redis caching)
 │   ├── subscription.ts   # Subscription business logic
 │   └── email.ts          # Nodemailer wrapper
-├── scanner/index.ts      # Periodic release checker
+├── scanner/index.ts      # Periodic release checker (setInterval)
+├── cache/
+│   └── redis.ts          # Optional Redis client
+├── grpc/
+│   └── server.ts         # gRPC server
 ├── db/
 │   ├── pool.ts           # pg Pool instance
 │   ├── subscriptions.ts  # Subscription SQL queries
 │   └── repositories.ts   # Repository SQL queries
-└── middleware/
-    └── errorHandler.ts   # Global error handler
+├── middleware/
+│   ├── errorHandler.ts   # Global error handler
+│   └── metricsMiddleware.ts
+└── public/index.html     # Frontend subscribe form
 
 migrations/               # node-pg-migrate files (.cjs)
+proto/                    # gRPC service definitions
 tests/unit/               # Vitest unit tests
 ```
 
@@ -162,3 +146,5 @@ tests/unit/               # Vitest unit tests
 **Vitest over Jest** — Native ESM support with no configuration hacks. Same `describe/it/expect` API, faster execution.
 
 **GitHub 429 handling** — On subscribe: returned to the client as a 429. During scanning: the scanner breaks out of the current cycle and retries on the next interval to avoid hammering the API.
+
+**Redis is optional** — The app starts and runs without a Redis connection. GitHub API responses are fetched fresh on every scan cycle if caching is unavailable.
