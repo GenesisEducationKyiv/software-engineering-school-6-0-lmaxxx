@@ -8,6 +8,13 @@ export interface Subscription {
   created_at: Date;
 }
 
+export interface SubscriptionResponse {
+  email: string;
+  repo: string;
+  confirmed: boolean;
+  last_seen_tag: string | null;
+}
+
 export interface Repository {
   id: number;
   repo: string;

@@ -1,5 +1,5 @@
 import { pool } from './pool.js';
-import type { Subscription } from '../types.js';
+import type { Subscription, SubscriptionResponse } from '../types.js';
 
 export async function findByEmailAndRepo(
   email: string,
@@ -64,9 +64,12 @@ export async function deleteSubscription(id: number): Promise<void> {
   await pool.query('DELETE FROM subscriptions WHERE id = $1', [id]);
 }
 
-export async function findConfirmedByEmail(email: string): Promise<Subscription[]> {
-  const result = await pool.query<Subscription>(
-    'SELECT * FROM subscriptions WHERE email = $1 AND confirmed = true',
+export async function findConfirmedByEmail(email: string): Promise<SubscriptionResponse[]> {
+  const result = await pool.query<SubscriptionResponse>(
+    `SELECT s.email, s.repo, s.confirmed, r.last_seen_tag
+     FROM subscriptions s
+     LEFT JOIN repositories r ON r.repo = s.repo
+     WHERE s.email = $1 AND s.confirmed = true`,
     [email],
   );
   return result.rows;

@@ -1,222 +1,140 @@
-openapi: 3.0.3
+swagger: "2.0"
 info:
-  title: GitHub Release Notification API
-  description: Subscribe to email notifications for new GitHub repository releases.
-  version: 1.0.0
-
-servers:
-  - url: http://localhost:3000
-    description: Local development
-
+  description: "GitHub Release Notification API that allows users to subscribe to email notifications about new releases of a chosen GitHub repository."
+  version: "1.0.0"
+  title: "GitHub Release Notification API"
+host: "releases-api.app"
+basePath: "/api"
+tags:
+  - name: "subscription"
+    description: "Subscription management operations"
+schemes:
+  - "http"
+  - "https"
 paths:
-  /api/subscribe:
+  /subscribe:
     post:
-      summary: Subscribe to release notifications
-      description: |
-        Subscribe an email address to release notifications for a GitHub repository.
-        Sends a confirmation email with a link to activate the subscription.
-        If the subscription already exists but is unconfirmed, resends the confirmation email.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SubscribeRequest'
-            example:
-              email: user@example.com
-              repo: golang/go
-      responses:
-        '200':
-          description: Subscription created (or confirmation email resent)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: Confirmation email sent
-        '400':
-          description: Invalid request (missing fields or invalid repo format)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Invalid repo format. Expected owner/repo
-        '404':
-          description: GitHub repository not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Repository not found on GitHub
-        '409':
-          description: Subscription already confirmed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Already subscribed
-        '429':
-          description: GitHub API rate limit exceeded
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: GitHub rate limit exceeded. Try again later.
-
-  /api/confirm/{token}:
-    get:
-      summary: Confirm email subscription
-      description: Confirms a subscription using the token from the confirmation email.
+      tags:
+        - "subscription"
+      summary: "Subscribe to release notifications"
+      description: "Subscribe an email to receive notifications about new releases of a GitHub repository. The repository is validated via GitHub API."
+      operationId: "subscribe"
+      consumes:
+        - "application/json"
+      produces:
+        - "application/json"
       parameters:
-        - name: token
-          in: path
+        - in: "body"
+          name: "body"
+          description: "Subscription request"
           required: true
           schema:
-            type: string
-            format: uuid
-          description: Confirmation token from the email link
+            $ref: "#/definitions/SubscribeRequest"
       responses:
-        '200':
-          description: Subscription confirmed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: Subscription confirmed
-        '400':
-          description: Subscription already confirmed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Subscription already confirmed
-        '404':
-          description: Token not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Token not found
-
-  /api/unsubscribe/{token}:
+        "200":
+          description: "Subscription successful. Confirmation email sent."
+        "400":
+          description: "Invalid input (e.g., invalid repo format)"
+        "404":
+          description: "Repository not found on GitHub"
+        "409":
+          description: "Email already subscribed to this repository"
+  /confirm/{token}:
     get:
-      summary: Unsubscribe from release notifications
-      description: Removes a subscription using the token from notification emails.
+      tags:
+        - "subscription"
+      summary: "Confirm email subscription"
+      description: "Confirms a subscription using the token sent in the confirmation email."
+      operationId: "confirmSubscription"
       parameters:
-        - name: token
-          in: path
+        - name: "token"
+          in: "path"
+          description: "Confirmation token"
           required: true
-          schema:
-            type: string
-            format: uuid
-          description: Unsubscribe token from notification emails
+          type: "string"
+      produces:
+        - "application/json"
       responses:
-        '200':
-          description: Successfully unsubscribed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
-              example:
-                message: Unsubscribed successfully
-        '404':
-          description: Token not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Token not found
-
-  /api/subscriptions:
+        "200":
+          description: "Subscription confirmed successfully"
+        "400":
+          description: "Invalid token"
+        "404":
+          description: "Token not found"
+  /unsubscribe/{token}:
     get:
-      summary: List active subscriptions for an email
-      description: Returns all confirmed subscriptions for the given email address.
+      tags:
+        - "subscription"
+      summary: "Unsubscribe from release notifications"
+      description: "Unsubscribes an email from release notifications using the token sent in emails."
+      operationId: "unsubscribe"
       parameters:
-        - name: email
-          in: query
+        - name: "token"
+          in: "path"
+          description: "Unsubscribe token"
           required: true
-          schema:
-            type: string
-            format: email
-          description: Email address to look up subscriptions for
+          type: "string"
+      produces:
+        - "application/json"
       responses:
-        '200':
-          description: List of confirmed subscriptions (may be empty)
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Subscription'
-              example:
-                - id: 1
-                  email: user@example.com
-                  repo: golang/go
-                  confirmed: true
-                  created_at: '2024-01-15T10:30:00.000Z'
-        '400':
-          description: Missing or invalid email parameter
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                error: Email is required
-
-components:
-  schemas:
-    SubscribeRequest:
-      type: object
-      required:
-        - email
-        - repo
-      properties:
-        email:
-          type: string
-          format: email
-          description: Email address to send notifications to
-        repo:
-          type: string
-          pattern: '^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$'
-          description: GitHub repository in owner/repo format
-          example: golang/go
-
-    Subscription:
-      type: object
-      properties:
-        id:
-          type: integer
-          description: Subscription ID
-        email:
-          type: string
-          format: email
-        repo:
-          type: string
-          description: GitHub repository in owner/repo format
-        confirmed:
-          type: boolean
-          description: Whether the subscription has been confirmed
-        created_at:
-          type: string
-          format: date-time
-          description: When the subscription was created
-
-    MessageResponse:
-      type: object
-      properties:
-        message:
-          type: string
-
-    ErrorResponse:
-      type: object
-      properties:
-        error:
-          type: string
+        "200":
+          description: "Unsubscribed successfully"
+        "400":
+          description: "Invalid token"
+        "404":
+          description: "Token not found"
+  /subscriptions:
+    get:
+      tags:
+        - "subscription"
+      summary: "Get subscriptions for an email"
+      description: "Returns all active subscriptions for the given email address."
+      operationId: "getSubscriptions"
+      parameters:
+        - name: "email"
+          in: "query"
+          description: "Email address to look up subscriptions for"
+          required: true
+          type: "string"
+      produces:
+        - "application/json"
+      responses:
+        "200":
+          description: "Successful operation - list of subscriptions returned"
+          schema:
+            type: "array"
+            items:
+              $ref: "#/definitions/Subscription"
+        "400":
+          description: "Invalid email"
+definitions:
+  SubscribeRequest:
+    type: "object"
+    required:
+      - "email"
+      - "repo"
+    properties:
+      email:
+        type: "string"
+        description: "Email address to subscribe"
+      repo:
+        type: "string"
+        description: "GitHub repository in owner/repo format (e.g., golang/go)"
+  Subscription:
+    type: "object"
+    required:
+      - "email"
+      - "repo"
+    properties:
+      email:
+        type: "string"
+        description: "Email address"
+      repo:
+        type: "string"
+        description: "GitHub repository in owner/repo format"
+      confirmed:
+        type: "boolean"
+        description: "Whether the subscription is confirmed"
+      last_seen_tag:
+        type: "string"
+        description: "Last seen release tag for this repository"

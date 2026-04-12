@@ -52,8 +52,7 @@ interface TokenRequest       { token: string }
 interface GetSubsRequest     { email: string }
 interface MessageResponse    { message: string }
 interface SubscriptionItem   {
-  id: number; email: string; repo: string; confirmed: boolean;
-  confirm_token: string; unsubscribe_token: string; created_at: string;
+  email: string; repo: string; confirmed: boolean; last_seen_tag: string;
 }
 interface GetSubsResponse    { subscriptions: SubscriptionItem[] }
 
@@ -121,13 +120,10 @@ async function getSubscriptionsHandler(
   try {
     const rows = await findConfirmedByEmail(email.trim());
     const subscriptions: SubscriptionItem[] = rows.map((s) => ({
-      id:                s.id,
-      email:             s.email,
-      repo:              s.repo,
-      confirmed:         s.confirmed,
-      confirm_token:     s.confirm_token,
-      unsubscribe_token: s.unsubscribe_token,
-      created_at:        s.created_at.toISOString(),
+      email:         s.email,
+      repo:          s.repo,
+      confirmed:     s.confirmed,
+      last_seen_tag: s.last_seen_tag ?? '',
     }));
     callback(null, { subscriptions });
   } catch (err) {

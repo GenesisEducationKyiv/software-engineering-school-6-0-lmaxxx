@@ -16,6 +16,7 @@ import { upsertRepository } from '../db/repositories.js';
 export { AppError };
 
 const REPO_REGEX = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function validateRepoFormat(repo: string): boolean {
   return REPO_REGEX.test(repo);
@@ -61,9 +62,12 @@ export async function confirmSubscription(token: string): Promise<void> {
 }
 
 export async function unsubscribeUser(token: string): Promise<void> {
+  if (!UUID_REGEX.test(token)) {
+    throw new AppError(400, 'Invalid token');
+  }
   const sub = await findByUnsubscribeToken(token);
   if (!sub) {
-    throw new AppError(404, 'Subscription not found');
+    throw new AppError(404, 'Token not found');
   }
   await deleteSubscription(sub.id);
 }

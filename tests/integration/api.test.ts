@@ -21,7 +21,7 @@ import { upsertRepository } from '../../src/db/repositories.js';
 import { checkRepoExists } from '../../src/services/github.js';
 import { sendConfirmationEmail } from '../../src/services/email.js';
 import { AppError } from '../../src/shared/appError.js';
-import type { Subscription } from '../../src/types.js';
+import type { Subscription, SubscriptionResponse } from '../../src/types.js';
 
 const makeSub = (overrides: Partial<Subscription> = {}): Subscription => ({
   id: 1,
@@ -177,28 +177,43 @@ describe('GET /api/unsubscribe/:token', () => {
     vi.mocked(findByUnsubscribeToken).mockResolvedValue(makeSub());
     vi.mocked(deleteSubscription).mockResolvedValue(undefined);
 
-    const res = await request(app).get('/api/unsubscribe/some-token');
+    const res = await request(app).get('/api/unsubscribe/00000000-0000-0000-0000-000000000000');
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ message: 'Unsubscribed successfully' });
     expect(deleteSubscription).toHaveBeenCalledWith(1);
   });
 
+  it('returns 400 for a malformed (non-UUID) token', async () => {
+    const res = await request(app).get('/api/unsubscribe/not-a-uuid');
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Invalid token' });
+  });
+
   it('returns 404 when the token is not found', async () => {
     vi.mocked(findByUnsubscribeToken).mockResolvedValue(null);
 
-    const res = await request(app).get('/api/unsubscribe/nonexistent-token');
+    const res = await request(app).get('/api/unsubscribe/00000000-0000-0000-0000-000000000000');
 
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: 'Subscription not found' });
+    expect(res.body).toEqual({ error: 'Token not found' });
   });
+});
+
+const makeSubResponse = (overrides: Partial<SubscriptionResponse> = {}): SubscriptionResponse => ({
+  email: 'test@example.com',
+  repo: 'owner/repo',
+  confirmed: true,
+  last_seen_tag: null,
+  ...overrides,
 });
 
 describe('GET /api/subscriptions', () => {
   it('returns 200 with confirmed subscriptions for the given email', async () => {
     const subs = [
-      makeSub({ confirmed: true }),
-      makeSub({ id: 2, repo: 'owner/other', confirmed: true }),
+      makeSubResponse(),
+      makeSubResponse({ repo: 'owner/other' }),
     ];
     vi.mocked(findConfirmedByEmail).mockResolvedValue(subs);
 
@@ -209,7 +224,7 @@ describe('GET /api/subscriptions', () => {
   });
 
   it('returns 200 with an empty array when there are no subscriptions', async () => {
-    vi.mocked(findConfirmedByEmail).mockResolvedValue([]);
+    vi.mocked(findConfirmedByEmail).mockResolvedValue([] as SubscriptionResponse[]);
 
     const res = await request(app).get('/api/subscriptions?email=test@example.com');
 

@@ -224,15 +224,21 @@ describe('unsubscribeUser', () => {
     mockFindByUnsubscribeToken.mockResolvedValue(makeSub());
     mockDeleteSubscription.mockResolvedValue(undefined);
 
-    await unsubscribeUser('token-xyz');
+    await unsubscribeUser('00000000-0000-0000-0000-000000000000');
 
     expect(mockDeleteSubscription).toHaveBeenCalledWith(1);
+  });
+
+  it('throws AppError(400) for a malformed (non-UUID) token', async () => {
+    await expect(unsubscribeUser('not-a-uuid')).rejects.toMatchObject({ status: 400 });
+    expect(mockFindByUnsubscribeToken).not.toHaveBeenCalled();
+    expect(mockDeleteSubscription).not.toHaveBeenCalled();
   });
 
   it('throws AppError(404) when unsubscribe token not found', async () => {
     mockFindByUnsubscribeToken.mockResolvedValue(null);
 
-    await expect(unsubscribeUser('bad-token')).rejects.toMatchObject({ status: 404 });
+    await expect(unsubscribeUser('00000000-0000-0000-0000-000000000000')).rejects.toMatchObject({ status: 404 });
     expect(mockDeleteSubscription).not.toHaveBeenCalled();
   });
 });
