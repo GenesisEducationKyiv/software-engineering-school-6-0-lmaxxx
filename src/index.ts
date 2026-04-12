@@ -6,6 +6,7 @@ import { app } from './app.js';
 import { startScanner } from './scanner/index.js';
 import { pool } from './db/pool.js';
 import { redisClient } from './cache/redis.js';
+import { startGrpcServer } from './grpc/server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,9 +26,13 @@ async function main() {
 
   const scannerInterval = startScanner();
 
+  const grpcPort = parseInt(process.env['GRPC_PORT'] ?? '50051', 10);
+  const grpcServer = await startGrpcServer(grpcPort);
+
   function shutdown(signal: string) {
     console.log(`Received ${signal}, shutting down gracefully...`);
     clearInterval(scannerInterval);
+    grpcServer?.forceShutdown();
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

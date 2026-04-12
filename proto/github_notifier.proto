@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package github_notifier;
+
+service GitHubNotifier {
+  rpc Subscribe           (SubscribeRequest)        returns (MessageResponse);
+  rpc ConfirmSubscription (TokenRequest)            returns (MessageResponse);
+  rpc Unsubscribe         (TokenRequest)            returns (MessageResponse);
+  rpc GetSubscriptions    (GetSubscriptionsRequest) returns (GetSubscriptionsResponse);
+}
+
+message SubscribeRequest        { string email = 1; string repo = 2; }
+message TokenRequest            { string token = 1; }
+message GetSubscriptionsRequest { string email = 1; }
+message MessageResponse         { string message = 1; }
+
+message SubscriptionItem {
+  int32  id                = 1;
+  string email             = 2;
+  string repo              = 3;
+  bool   confirmed         = 4;
+  string confirm_token     = 5;
+  string unsubscribe_token = 6;
+  string created_at        = 7;
+}
+
+message GetSubscriptionsResponse {
+  repeated SubscriptionItem subscriptions = 1;
+}
