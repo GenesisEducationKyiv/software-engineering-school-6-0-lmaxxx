@@ -21,5 +21,21 @@ services:
       - "1025:1025"   # SMTP
       - "8025:8025"   # Web UI
 
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://app:secret@postgres:5432/github_notifier
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_FROM: noreply@github-notifier.local
+      SCAN_INTERVAL_MS: ${SCAN_INTERVAL_MS:-60000}
+      BASE_URL: ${BASE_URL:-http://localhost:3000}
+
 volumes:
   postgres_data:
