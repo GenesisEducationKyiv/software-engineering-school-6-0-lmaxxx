@@ -31,7 +31,7 @@ export async function checkRepoExists(repo: string): Promise<void> {
       if (err.response?.status === 404) {
         throw new AppError(404, 'Repository not found');
       }
-      if (err.response?.status === 429) {
+      if (err.response?.status === 403 || err.response?.status === 429) {
         throw new AppError(429, 'GitHub rate limit exceeded');
       }
     }
@@ -61,7 +61,7 @@ export async function getLatestRelease(repo: string): Promise<{ tag_name: string
         await setCache(key, NULL_SENTINEL, CACHE_TTL);
         return null;
       }
-      if (err.response?.status === 429) throw new AppError(429, 'GitHub rate limit exceeded');
+      if (err.response?.status === 403 || err.response?.status === 429) throw new AppError(429, 'GitHub rate limit exceeded');
     }
     throw err;
   }

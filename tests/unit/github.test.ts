@@ -13,6 +13,7 @@ vi.mock('axios', () => ({
 vi.mock('../../src/config.js', () => ({
   config: {
     githubToken: '',
+    redisTtlSeconds: 600,
   },
 }));
 
