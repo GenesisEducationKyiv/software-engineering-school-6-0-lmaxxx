@@ -15,6 +15,16 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   mailhog:
     image: mailhog/mailhog
     ports:
@@ -37,6 +47,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://app:secret@postgres:5432/github_notifier
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
@@ -45,6 +57,7 @@ services:
       SMTP_FROM: noreply@github-notifier.local
       SCAN_INTERVAL_MS: ${SCAN_INTERVAL_MS:-60000}
       BASE_URL: ${BASE_URL:-http://localhost:3000}
+      REDIS_URL: redis://redis:6379
 
 volumes:
   postgres_data:

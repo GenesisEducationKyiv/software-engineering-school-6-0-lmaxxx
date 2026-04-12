@@ -5,6 +5,7 @@ import { config } from './config.js';
 import { app } from './app.js';
 import { startScanner } from './scanner/index.js';
 import { pool } from './db/pool.js';
+import { redisClient } from './cache/redis.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -36,6 +37,7 @@ async function main() {
 
     server.close(async () => {
       await pool.end();
+      await redisClient?.quit();
       console.log('Shutdown complete');
       clearTimeout(forceExit);
       process.exit(0);

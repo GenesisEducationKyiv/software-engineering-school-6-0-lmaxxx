@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import axios from 'axios';
 import { checkRepoExists, getLatestRelease } from '../../src/services/github.js';
+import { getCache, setCache } from '../../src/cache/redis.js';
 
 vi.mock('axios', () => ({
   default: {
@@ -15,6 +16,16 @@ vi.mock('../../src/config.js', () => ({
   },
 }));
 
+vi.mock('../../src/cache/redis.js', () => ({
+  redisClient: null,
+  getCache: vi.fn().mockResolvedValue(null),
+  setCache: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../src/metrics.js', () => ({
+  githubApiCallsTotal: { inc: vi.fn() },
+}));
+
 const mockAxios = vi.mocked(axios);
 
 function makeAxiosError(status: number) {
@@ -22,6 +33,9 @@ function makeAxiosError(status: number) {
     response: { status },
   });
 }
+
+const mockGetCache = vi.mocked(getCache);
+const mockSetCache = vi.mocked(setCache);
 
 describe('checkRepoExists', () => {
   beforeEach(() => {
@@ -98,6 +112,31 @@ describe('checkRepoExists', () => {
 
     (config as { githubToken: string }).githubToken = '';
   });
+
+  it('returns early on cache hit without calling GitHub API', async () => {
+    mockGetCache.mockResolvedValueOnce('exists');
+
+    await expect(checkRepoExists('owner/repo')).resolves.toBeUndefined();
+    expect(mockAxios.get).not.toHaveBeenCalled();
+  });
+
+  it('stores result in cache after successful API call', async () => {
+    mockAxios.get.mockResolvedValue({ status: 200, data: {} });
+    mockAxios.isAxiosError.mockReturnValue(false);
+
+    await checkRepoExists('owner/repo');
+
+    expect(mockSetCache).toHaveBeenCalledWith('github:checkRepoExists:owner/repo', 'exists', 600);
+  });
+
+  it('does not cache on 404', async () => {
+    const err = makeAxiosError(404);
+    mockAxios.get.mockRejectedValue(err);
+    mockAxios.isAxiosError.mockReturnValue(true);
+
+    await expect(checkRepoExists('owner/repo')).rejects.toMatchObject({ status: 404 });
+    expect(mockSetCache).not.toHaveBeenCalled();
+  });
 });
 
 describe('getLatestRelease', () => {
@@ -136,5 +175,47 @@ describe('getLatestRelease', () => {
     mockAxios.isAxiosError.mockReturnValue(false);
 
     await expect(getLatestRelease('owner/repo')).rejects.toThrow('connection refused');
+  });
+
+  it('returns cached release without calling GitHub API', async () => {
+    mockGetCache.mockResolvedValueOnce(JSON.stringify({ tag_name: 'v2.0.0' }));
+
+    const result = await getLatestRelease('owner/repo');
+
+    expect(result).toEqual({ tag_name: 'v2.0.0' });
+    expect(mockAxios.get).not.toHaveBeenCalled();
+  });
+
+  it('returns null on cache hit with null sentinel without calling GitHub API', async () => {
+    mockGetCache.mockResolvedValueOnce('__NULL__');
+
+    const result = await getLatestRelease('owner/repo');
+
+    expect(result).toBeNull();
+    expect(mockAxios.get).not.toHaveBeenCalled();
+  });
+
+  it('stores release in cache after successful API call', async () => {
+    mockAxios.get.mockResolvedValue({ data: { tag_name: 'v1.2.3' } });
+    mockAxios.isAxiosError.mockReturnValue(false);
+
+    await getLatestRelease('owner/repo');
+
+    expect(mockSetCache).toHaveBeenCalledWith(
+      'github:getLatestRelease:owner/repo',
+      JSON.stringify({ tag_name: 'v1.2.3' }),
+      600,
+    );
+  });
+
+  it('stores null sentinel in cache when repo has no releases', async () => {
+    const err = makeAxiosError(404);
+    mockAxios.get.mockRejectedValue(err);
+    mockAxios.isAxiosError.mockReturnValue(true);
+
+    const result = await getLatestRelease('owner/repo');
+
+    expect(result).toBeNull();
+    expect(mockSetCache).toHaveBeenCalledWith('github:getLatestRelease:owner/repo', '__NULL__', 600);
   });
 });

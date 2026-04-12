@@ -28,4 +28,6 @@ export const config = {
   scanIntervalMs: parseInt(optional('SCAN_INTERVAL_MS', '300000'), 10),
 
   baseUrl: optional('BASE_URL', 'http://localhost:3000'),
+
+  redisUrl: process.env['REDIS_URL'] ?? null,
 } as const;
