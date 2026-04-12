@@ -5,7 +5,7 @@ import { sendReleaseNotification } from '../services/email.js';
 import { config } from '../config.js';
 import { AppError } from '../shared/appError.js';
 
-export function startScanner(): void {
+export function startScanner(): NodeJS.Timeout {
   const run = async () => {
     const repos = await getReposWithConfirmedSubscriptions();
     for (const repo of repos) {
@@ -28,9 +28,10 @@ export function startScanner(): void {
     }
   };
 
-  setInterval(() => {
+  const interval = setInterval(() => {
     run().catch((err) => console.error('Scanner cycle failed:', err));
   }, config.scanIntervalMs);
 
   console.log(`Scanner started (interval: ${config.scanIntervalMs}ms)`);
+  return interval;
 }

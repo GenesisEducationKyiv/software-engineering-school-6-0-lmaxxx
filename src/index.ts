@@ -4,6 +4,7 @@ import { runner as migrate } from 'node-pg-migrate';
 import { config } from './config.js';
 import { app } from './app.js';
 import { startScanner } from './scanner/index.js';
+import { pool } from './db/pool.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,11 +18,32 @@ async function main() {
     log: console.log,
   });
 
-  app.listen(config.port, () => {
+  const server = app.listen(config.port, () => {
     console.log(`Server listening on port ${config.port}`);
   });
 
-  startScanner();
+  const scannerInterval = startScanner();
+
+  function shutdown(signal: string) {
+    console.log(`Received ${signal}, shutting down gracefully...`);
+    clearInterval(scannerInterval);
+
+    const forceExit = setTimeout(() => {
+      console.error('Forced shutdown after timeout');
+      process.exit(1);
+    }, 10_000);
+    forceExit.unref();
+
+    server.close(async () => {
+      await pool.end();
+      console.log('Shutdown complete');
+      clearTimeout(forceExit);
+      process.exit(0);
+    });
+  }
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 main().catch((err) => {

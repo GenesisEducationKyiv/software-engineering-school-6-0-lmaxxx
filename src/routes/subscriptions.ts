@@ -3,12 +3,16 @@ import { findConfirmedByEmail } from '../db/subscriptions.js';
 import { AppError } from '../shared/appError.js';
 
 const router = Router();
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email } = req.query;
     if (!email || typeof email !== 'string' || email.trim() === '') {
       throw new AppError(400, 'Missing or invalid email');
+    }
+    if (!EMAIL_REGEX.test(email.trim())) {
+      throw new AppError(400, 'Invalid email format');
     }
     const subscriptions = await findConfirmedByEmail(email.trim());
     res.json(subscriptions);

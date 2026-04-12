@@ -2,12 +2,16 @@ import { Router } from 'express';
 import { createSubscription } from '../services/subscription.js';
 
 const router = Router();
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 router.post('/', async (req, res, next) => {
   try {
     const { email, repo } = req.body as { email?: unknown; repo?: unknown };
     if (typeof email !== 'string' || !email) {
       return res.status(400).json({ error: 'email is required' });
+    }
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
     }
     if (typeof repo !== 'string' || !repo) {
       return res.status(400).json({ error: 'repo is required' });
