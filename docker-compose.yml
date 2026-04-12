@@ -21,6 +21,15 @@ services:
       - "1025:1025"   # SMTP
       - "8025:8025"   # Web UI
 
+  swagger-ui:
+    image: swaggerapi/swagger-ui
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./swagger.yaml:/swagger.yaml
+    environment:
+      SWAGGER_JSON: /swagger.yaml
+
   app:
     build: .
     ports:
