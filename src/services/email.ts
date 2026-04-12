@@ -17,7 +17,7 @@ export async function sendConfirmationEmail(
 ): Promise<void> {
   const confirmUrl = `${config.baseUrl}/api/confirm/${confirmToken}`;
   await transporter.sendMail({
-    from: config.smtp.user || 'noreply@github-notifier.local',
+    from: config.smtp.from,
     to: email,
     subject: `Confirm your subscription to ${repo} releases`,
     text: [
@@ -38,7 +38,7 @@ export async function sendReleaseNotification(
   const releaseUrl = `https://github.com/${repo}/releases/tag/${tag}`;
   const unsubscribeUrl = `${config.baseUrl}/api/unsubscribe/${unsubscribeToken}`;
   await transporter.sendMail({
-    from: config.smtp.user || 'noreply@github-notifier.local',
+    from: config.smtp.from,
     to: email,
     subject: `New release of ${repo}: ${tag}`,
     text: [

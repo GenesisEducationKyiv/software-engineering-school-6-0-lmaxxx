@@ -13,6 +13,7 @@ function optional(name: string, fallback: string): string {
 export const config = {
   port: parseInt(optional('PORT', '3000'), 10),
   nodeEnv: optional('NODE_ENV', 'development'),
+  grpcPort: parseInt(optional('GRPC_PORT', '50051'), 10),
 
   databaseUrl: required('DATABASE_URL'),
 
@@ -23,6 +24,7 @@ export const config = {
     port: parseInt(optional('SMTP_PORT', '587'), 10),
     user: optional('SMTP_USER', ''),
     pass: optional('SMTP_PASS', ''),
+    from: optional('SMTP_FROM', 'noreply@github-notifier.local'),
   },
 
   scanIntervalMs: parseInt(optional('SCAN_INTERVAL_MS', '300000'), 10),
@@ -30,4 +32,5 @@ export const config = {
   baseUrl: optional('BASE_URL', 'http://localhost:3000'),
 
   redisUrl: process.env['REDIS_URL'] ?? null,
+  redisTtlSeconds: parseInt(optional('REDIS_TTL_SECONDS', '600'), 10),
 } as const;

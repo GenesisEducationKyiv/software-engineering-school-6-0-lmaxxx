@@ -26,8 +26,7 @@ async function main() {
 
   const scannerInterval = startScanner();
 
-  const grpcPort = parseInt(process.env['GRPC_PORT'] ?? '50051', 10);
-  const grpcServer = await startGrpcServer(grpcPort);
+  const grpcServer = await startGrpcServer(config.grpcPort);
 
   function shutdown(signal: string) {
     console.log(`Received ${signal}, shutting down gracefully...`);

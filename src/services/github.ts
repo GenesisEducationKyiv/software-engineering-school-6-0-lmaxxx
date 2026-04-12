@@ -5,7 +5,7 @@ import { githubApiCallsTotal } from '../metrics.js';
 import { getCache, setCache } from '../cache/redis.js';
 
 const BASE = 'https://api.github.com';
-const CACHE_TTL = 600; // 10 minutes
+const CACHE_TTL = config.redisTtlSeconds;
 const NULL_SENTINEL = '__NULL__';
 
 function headers(): Record<string, string> {
