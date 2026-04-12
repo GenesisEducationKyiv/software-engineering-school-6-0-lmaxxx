@@ -4,6 +4,7 @@ import { getLatestRelease } from '../services/github.js';
 import { sendReleaseNotification } from '../services/email.js';
 import { config } from '../config.js';
 import { AppError } from '../shared/appError.js';
+import { scansTotal } from '../metrics.js';
 
 export function startScanner(): NodeJS.Timeout {
   const run = async () => {
@@ -26,6 +27,7 @@ export function startScanner(): NodeJS.Timeout {
         console.error(`Error scanning ${repo.repo}:`, err);
       }
     }
+    scansTotal.inc();
   };
 
   const interval = setInterval(() => {

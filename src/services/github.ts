@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { config } from '../config.js';
-import {AppError} from "../shared/appError.js";
+import { AppError } from '../shared/appError.js';
+import { githubApiCallsTotal } from '../metrics.js';
 
 const BASE = 'https://api.github.com';
 
@@ -16,6 +17,7 @@ function headers(): Record<string, string> {
 }
 
 export async function checkRepoExists(repo: string): Promise<void> {
+  githubApiCallsTotal.inc({ endpoint: 'checkRepoExists' });
   try {
     await axios.get(`${BASE}/repos/${repo}`, { headers: headers() });
   } catch (err) {
@@ -32,6 +34,7 @@ export async function checkRepoExists(repo: string): Promise<void> {
 }
 
 export async function getLatestRelease(repo: string): Promise<{ tag_name: string } | null> {
+  githubApiCallsTotal.inc({ endpoint: 'getLatestRelease' });
   try {
     const res = await axios.get<{ tag_name: string }>(
       `${BASE}/repos/${repo}/releases/latest`,
