@@ -5,6 +5,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    env: {
+      DATABASE_URL: 'postgres://test:test@localhost:5432/test_db',
+    },
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
