@@ -24,7 +24,7 @@ export async function insertSubscription(
      RETURNING *`,
     [email, repo, confirmToken, unsubscribeToken],
   );
-  return result.rows[0]!;
+  return result.rows[0];
 }
 
 export async function updateConfirmToken(
