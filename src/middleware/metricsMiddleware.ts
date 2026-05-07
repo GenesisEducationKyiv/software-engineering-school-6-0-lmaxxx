@@ -4,7 +4,8 @@ import { httpRequestsTotal, httpRequestDurationSeconds } from '../metrics.js';
 export function metricsMiddleware(req: Request, res: Response, next: NextFunction): void {
   const start = process.hrtime.bigint();
   res.on('finish', () => {
-    const route = (req.route?.path as string | undefined) ?? req.path;
+    const expressRoute = req.route as { path?: string } | undefined;
+    const route = typeof expressRoute?.path === 'string' ? expressRoute.path : 'unknown';
     const labels = {
       method: req.method,
       route,
