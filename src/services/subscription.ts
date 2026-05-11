@@ -10,8 +10,10 @@ import {
   markConfirmed,
   updateConfirmToken,
   deleteSubscription,
+  findConfirmedByEmail,
 } from '../db/subscriptions.js';
 import { upsertRepository } from '../db/repositories.js';
+import type { SubscriptionResponse } from '../types.js';
 
 export { AppError };
 
@@ -71,3 +73,8 @@ export async function unsubscribeUser(token: string): Promise<void> {
   }
   await deleteSubscription(sub.id);
 }
+
+export async function getSubscriptionsByEmail(email: string): Promise<SubscriptionResponse[]> {
+  return findConfirmedByEmail(email);
+}
+

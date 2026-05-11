@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { createSubscription } from '../services/subscription.js';
+import { EMAIL_REGEX } from '../shared/validation.js';
 
 const router = Router();
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 router.post('/', async (req, res, next) => {
   try {
