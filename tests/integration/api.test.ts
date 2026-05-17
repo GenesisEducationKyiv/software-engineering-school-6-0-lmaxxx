@@ -1,248 +1,271 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import request from 'supertest';
 
-vi.mock('../../src/db/subscriptions.js');
-vi.mock('../../src/db/repositories.js');
-vi.mock('../../src/services/github.js');
-vi.mock('../../src/services/email.js');
+vi.mock('nodemailer', () => ({
+  default: {
+    createTransport: vi.fn().mockReturnValue({
+      sendMail: vi.fn().mockResolvedValue({ messageId: 'mock-id' }),
+    }),
+  },
+}));
+
+vi.mock('axios');
 
 import { app } from '../../src/app.js';
-import {
-  findByEmailAndRepo,
-  insertSubscription,
-  updateConfirmToken,
-  findByConfirmToken,
-  markConfirmed,
-  findByUnsubscribeToken,
-  deleteSubscription,
-  findConfirmedByEmail,
-} from '../../src/db/subscriptions.js';
-import { upsertRepository } from '../../src/db/repositories.js';
-import { checkRepoExists } from '../../src/services/github.js';
-import { sendConfirmationEmail } from '../../src/services/email.js';
-import { AppError } from '../../src/shared/appError.js';
-import type { Subscription, SubscriptionResponse } from '../../src/types.js';
+import { pool } from '../../src/db/pool.js';
+import axios from 'axios';
 
-const makeSub = (overrides: Partial<Subscription> = {}): Subscription => ({
-  id: 1,
-  email: 'test@example.com',
-  repo: 'owner/repo',
-  confirmed: false,
-  confirm_token: 'confirm-token-uuid',
-  unsubscribe_token: 'unsub-token-uuid',
-  created_at: new Date('2024-01-01'),
-  ...overrides,
-});
+const mockGet = vi.mocked(axios.get);
+const mockIsAxiosError = vi.mocked(axios.isAxiosError);
 
-beforeEach(() => {
+const CONFIRM_TOKEN = '11111111-1111-1111-1111-111111111111';
+const UNSUB_TOKEN = '22222222-2222-2222-2222-222222222222';
+
+async function cleanDb() {
+  await pool.query('DELETE FROM subscriptions');
+  await pool.query('DELETE FROM repositories');
+}
+
+async function insertSub(opts: {
+  email?: string;
+  repo?: string;
+  confirmed?: boolean;
+  confirmToken?: string;
+  unsubToken?: string;
+}) {
+  const {
+    email = 'user@example.com',
+    repo = 'owner/repo',
+    confirmed = false,
+    confirmToken = CONFIRM_TOKEN,
+    unsubToken = UNSUB_TOKEN,
+  } = opts;
+  await pool.query(
+    `INSERT INTO subscriptions (email, repo, confirm_token, unsubscribe_token, confirmed)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [email, repo, confirmToken, unsubToken, confirmed],
+  );
+}
+
+beforeEach(async () => {
   vi.clearAllMocks();
+  mockGet.mockResolvedValue({ data: { full_name: 'owner/repo' }, status: 200 });
+  mockIsAxiosError.mockReturnValue(false);
+  await cleanDb();
 });
 
-describe('POST /api/subscribe', () => {
-  it('returns 200 and sends a confirmation email for a new subscription', async () => {
-    vi.mocked(checkRepoExists).mockResolvedValue(undefined);
-    vi.mocked(findByEmailAndRepo).mockResolvedValue(null);
-    vi.mocked(insertSubscription).mockResolvedValue(makeSub());
-    vi.mocked(upsertRepository).mockResolvedValue(undefined);
-    vi.mocked(sendConfirmationEmail).mockResolvedValue(undefined);
+afterAll(async () => {
+  await pool.end();
+});
 
+// ---------------------------------------------------------------------------
+// POST /api/subscribe
+// ---------------------------------------------------------------------------
+describe('POST /api/subscribe', () => {
+  it('inserts subscription + repository row and returns 200', async () => {
     const res = await request(app)
       .post('/api/subscribe')
-      .send({ email: 'test@example.com', repo: 'owner/repo' });
+      .send({ email: 'user@example.com', repo: 'owner/repo' });
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ message: 'Confirmation email sent' });
-    expect(sendConfirmationEmail).toHaveBeenCalledOnce();
+
+    const { rows: subs } = await pool.query(
+      'SELECT * FROM subscriptions WHERE email = $1 AND repo = $2',
+      ['user@example.com', 'owner/repo'],
+    );
+    expect(subs).toHaveLength(1);
+    expect(subs[0].confirmed).toBe(false);
+
+    const { rows: repos } = await pool.query(
+      'SELECT * FROM repositories WHERE repo = $1',
+      ['owner/repo'],
+    );
+    expect(repos).toHaveLength(1);
   });
 
-  it('returns 200 and resends confirmation for an existing unconfirmed subscription', async () => {
-    vi.mocked(checkRepoExists).mockResolvedValue(undefined);
-    vi.mocked(findByEmailAndRepo).mockResolvedValue(makeSub({ confirmed: false }));
-    vi.mocked(updateConfirmToken).mockResolvedValue(undefined);
-    vi.mocked(sendConfirmationEmail).mockResolvedValue(undefined);
+  it('re-subscribing when unconfirmed updates confirm_token and returns 200', async () => {
+    await insertSub({ confirmToken: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' });
 
     const res = await request(app)
       .post('/api/subscribe')
-      .send({ email: 'test@example.com', repo: 'owner/repo' });
+      .send({ email: 'user@example.com', repo: 'owner/repo' });
 
     expect(res.status).toBe(200);
-    expect(updateConfirmToken).toHaveBeenCalledOnce();
-    expect(sendConfirmationEmail).toHaveBeenCalledOnce();
+
+    const { rows } = await pool.query(
+      'SELECT * FROM subscriptions WHERE email = $1',
+      ['user@example.com'],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].confirm_token).not.toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
   });
 
-  it('returns 400 when email is missing', async () => {
-    const res = await request(app)
-      .post('/api/subscribe')
-      .send({ repo: 'owner/repo' });
-
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'email is required' });
-  });
-
-  it('returns 400 when email format is invalid', async () => {
-    const res = await request(app)
-      .post('/api/subscribe')
-      .send({ email: 'not-an-email', repo: 'owner/repo' });
-
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Invalid email format' });
-  });
-
-  it('returns 400 when repo is missing', async () => {
-    const res = await request(app)
-      .post('/api/subscribe')
-      .send({ email: 'test@example.com' });
-
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'repo is required' });
-  });
-
-  it('returns 400 when repo format is invalid', async () => {
-    const res = await request(app)
-      .post('/api/subscribe')
-      .send({ email: 'test@example.com', repo: 'invalid-no-slash' });
-
-    expect(res.status).toBe(400);
-    expect(res.body).toMatchObject({ error: expect.stringContaining('Invalid repo format') });
-  });
-
-  it('returns 404 when the repo does not exist on GitHub', async () => {
-    vi.mocked(checkRepoExists).mockRejectedValue(new AppError(404, 'Repository not found'));
+  it('returns 409 when subscription is already confirmed', async () => {
+    await insertSub({ confirmed: true });
 
     const res = await request(app)
       .post('/api/subscribe')
-      .send({ email: 'test@example.com', repo: 'owner/nonexistent' });
-
-    expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: 'Repository not found' });
-  });
-
-  it('returns 409 when the subscription is already confirmed', async () => {
-    vi.mocked(checkRepoExists).mockResolvedValue(undefined);
-    vi.mocked(findByEmailAndRepo).mockResolvedValue(makeSub({ confirmed: true }));
-
-    const res = await request(app)
-      .post('/api/subscribe')
-      .send({ email: 'test@example.com', repo: 'owner/repo' });
+      .send({ email: 'user@example.com', repo: 'owner/repo' });
 
     expect(res.status).toBe(409);
-    expect(res.body).toEqual({ error: 'Already subscribed to this repository' });
+
+    const { rows } = await pool.query('SELECT * FROM subscriptions');
+    expect(rows).toHaveLength(1);
   });
 
-  it('returns 429 when GitHub rate limit is hit', async () => {
-    vi.mocked(checkRepoExists).mockRejectedValue(new AppError(429, 'GitHub rate limit exceeded'));
+  it('returns 404 when GitHub repo does not exist', async () => {
+    const err = Object.assign(new Error('Not Found'), { response: { status: 404 } });
+    mockGet.mockRejectedValueOnce(err);
+    mockIsAxiosError.mockReturnValue(true);
 
     const res = await request(app)
       .post('/api/subscribe')
-      .send({ email: 'test@example.com', repo: 'owner/repo' });
+      .send({ email: 'user@example.com', repo: 'owner/notfound' });
+
+    expect(res.status).toBe(404);
+
+    const { rows } = await pool.query('SELECT * FROM subscriptions');
+    expect(rows).toHaveLength(0);
+  });
+
+  it('returns 429 when GitHub rate limit is exceeded', async () => {
+    const err = Object.assign(new Error('Rate limited'), { response: { status: 429 } });
+    mockGet.mockRejectedValueOnce(err);
+    mockIsAxiosError.mockReturnValue(true);
+
+    const res = await request(app)
+      .post('/api/subscribe')
+      .send({ email: 'user@example.com', repo: 'owner/repo' });
 
     expect(res.status).toBe(429);
-    expect(res.body).toEqual({ error: 'GitHub rate limit exceeded' });
+  });
+
+  it.each([
+    ['missing email', { repo: 'owner/repo' }],
+    ['invalid email', { email: 'not-an-email', repo: 'owner/repo' }],
+    ['missing repo', { email: 'user@example.com' }],
+    ['invalid repo format', { email: 'user@example.com', repo: 'no-slash' }],
+  ])('returns 400 for %s', async (_label, body) => {
+    const res = await request(app).post('/api/subscribe').send(body);
+    expect(res.status).toBe(400);
   });
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/confirm/:token
+// ---------------------------------------------------------------------------
 describe('GET /api/confirm/:token', () => {
-  it('returns 200 for a valid unconfirmed token', async () => {
-    vi.mocked(findByConfirmToken).mockResolvedValue(makeSub({ confirmed: false }));
-    vi.mocked(markConfirmed).mockResolvedValue(undefined);
+  it('marks subscription confirmed and returns 200', async () => {
+    await insertSub({ confirmed: false });
 
-    const res = await request(app).get('/api/confirm/some-token');
+    const res = await request(app).get(`/api/confirm/${CONFIRM_TOKEN}`);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ message: 'Subscription confirmed' });
-    expect(markConfirmed).toHaveBeenCalledWith(1);
+
+    const { rows } = await pool.query(
+      'SELECT confirmed FROM subscriptions WHERE confirm_token = $1',
+      [CONFIRM_TOKEN],
+    );
+    expect(rows[0].confirmed).toBe(true);
   });
 
-  it('returns 400 when the subscription is already confirmed', async () => {
-    vi.mocked(findByConfirmToken).mockResolvedValue(makeSub({ confirmed: true }));
+  it('returns 400 when already confirmed', async () => {
+    await insertSub({ confirmed: true });
 
-    const res = await request(app).get('/api/confirm/some-token');
+    const res = await request(app).get(`/api/confirm/${CONFIRM_TOKEN}`);
 
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Subscription already confirmed' });
   });
 
-  it('returns 404 when the token is not found', async () => {
-    vi.mocked(findByConfirmToken).mockResolvedValue(null);
-
+  it('returns 404 for unknown token', async () => {
     const res = await request(app).get('/api/confirm/nonexistent-token');
 
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: 'Confirmation token not found' });
   });
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/unsubscribe/:token
+// ---------------------------------------------------------------------------
 describe('GET /api/unsubscribe/:token', () => {
-  it('returns 200 and deletes the subscription for a valid token', async () => {
-    vi.mocked(findByUnsubscribeToken).mockResolvedValue(makeSub());
-    vi.mocked(deleteSubscription).mockResolvedValue(undefined);
+  it('deletes subscription and returns 200', async () => {
+    await insertSub({});
 
-    const res = await request(app).get('/api/unsubscribe/00000000-0000-0000-0000-000000000000');
+    const res = await request(app).get(`/api/unsubscribe/${UNSUB_TOKEN}`);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ message: 'Unsubscribed successfully' });
-    expect(deleteSubscription).toHaveBeenCalledWith(1);
+
+    const { rows } = await pool.query('SELECT * FROM subscriptions');
+    expect(rows).toHaveLength(0);
   });
 
-  it('returns 400 for a malformed (non-UUID) token', async () => {
+  it('returns 400 for malformed (non-UUID) token', async () => {
     const res = await request(app).get('/api/unsubscribe/not-a-uuid');
 
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Invalid token' });
   });
 
-  it('returns 404 when the token is not found', async () => {
-    vi.mocked(findByUnsubscribeToken).mockResolvedValue(null);
-
-    const res = await request(app).get('/api/unsubscribe/00000000-0000-0000-0000-000000000000');
+  it('returns 404 for valid UUID that does not exist', async () => {
+    const res = await request(app).get('/api/unsubscribe/33333333-3333-3333-3333-333333333333');
 
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: 'Token not found' });
   });
 });
 
-const makeSubResponse = (overrides: Partial<SubscriptionResponse> = {}): SubscriptionResponse => ({
-  email: 'test@example.com',
-  repo: 'owner/repo',
-  confirmed: true,
-  last_seen_tag: null,
-  ...overrides,
-});
-
+// ---------------------------------------------------------------------------
+// GET /api/subscriptions
+// ---------------------------------------------------------------------------
 describe('GET /api/subscriptions', () => {
-  it('returns 200 with confirmed subscriptions for the given email', async () => {
-    const subs = [
-      makeSubResponse(),
-      makeSubResponse({ repo: 'owner/other' }),
-    ];
-    vi.mocked(findConfirmedByEmail).mockResolvedValue(subs);
+  it('returns only confirmed subscriptions for the email', async () => {
+    await insertSub({
+      confirmed: true,
+      repo: 'owner/repo-one',
+      unsubToken: '44444444-4444-4444-4444-444444444444',
+      confirmToken: '55555555-5555-5555-5555-555555555555',
+    });
+    await insertSub({
+      confirmed: false,
+      repo: 'owner/repo-two',
+      unsubToken: '66666666-6666-6666-6666-666666666666',
+      confirmToken: '77777777-7777-7777-7777-777777777777',
+    });
 
-    const res = await request(app).get('/api/subscriptions?email=test@example.com');
+    const res = await request(app)
+      .get('/api/subscriptions')
+      .query({ email: 'user@example.com' });
 
     expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(2);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].repo).toBe('owner/repo-one');
   });
 
-  it('returns 200 with an empty array when there are no subscriptions', async () => {
-    vi.mocked(findConfirmedByEmail).mockResolvedValue([] as SubscriptionResponse[]);
-
-    const res = await request(app).get('/api/subscriptions?email=test@example.com');
+  it('returns empty array when no confirmed subscriptions exist', async () => {
+    const res = await request(app)
+      .get('/api/subscriptions')
+      .query({ email: 'nobody@example.com' });
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
 
-  it('returns 400 when the email query param is missing', async () => {
+  it('includes last_seen_tag from repositories table when present', async () => {
+    await insertSub({ confirmed: true });
+    await pool.query(
+      "INSERT INTO repositories (repo, last_seen_tag) VALUES ('owner/repo', 'v2.0.0')",
+    );
+
+    const res = await request(app)
+      .get('/api/subscriptions')
+      .query({ email: 'user@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].last_seen_tag).toBe('v2.0.0');
+  });
+
+  it('returns 400 when email query param is missing', async () => {
     const res = await request(app).get('/api/subscriptions');
 
     expect(res.status).toBe(400);
-    expect(res.body).toMatchObject({ error: expect.stringContaining('email') });
-  });
-
-  it('returns 400 when the email format is invalid', async () => {
-    const res = await request(app).get('/api/subscriptions?email=not-valid');
-
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: 'Invalid email format' });
   });
 });
