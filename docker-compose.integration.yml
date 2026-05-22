@@ -1,7 +1,6 @@
 services:
   postgres-test:
     image: postgres:18-alpine
-    platform: linux/arm64
     environment:
       POSTGRES_USER: testuser
       POSTGRES_PASSWORD: testpass

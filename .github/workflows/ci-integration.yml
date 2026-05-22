@@ -10,21 +10,6 @@ jobs:
   integration:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: testuser
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: github_notifier_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U testuser -d github_notifier_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
     steps:
       - uses: actions/checkout@v4
 
@@ -37,7 +22,6 @@ jobs:
 
       - run: npm run test:integration
         env:
-          DATABASE_URL: postgres://testuser:testpass@localhost:5433/github_notifier_test
           GITHUB_API_BASE_URL: http://localhost:4001
           REDIS_URL: ""
           NODE_ENV: test
@@ -46,3 +30,7 @@ jobs:
           SMTP_PORT: "1025"
           SMTP_FROM: noreply@test.local
           GITHUB_TOKEN: ""
+
+      - name: Stop integration stack
+        if: always()
+        run: npm run db:down
