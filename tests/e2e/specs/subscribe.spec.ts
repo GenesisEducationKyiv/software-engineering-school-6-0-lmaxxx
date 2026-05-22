@@ -56,3 +56,24 @@ test('shows error message for invalid repo format', async ({ page }) => {
   await expect(msg).toBeVisible({ timeout: 10_000 });
   await expect(msg).toHaveClass(/error/);
 });
+
+test('shows error message when GitHub rate limit is exceeded', async ({ page }) => {
+  await page.fill('#email', 'user@example.com');
+  await page.fill('#repo', 'ratelimited/repo');
+  await page.click('#submit-btn');
+
+  const msg = page.locator('#message');
+  await expect(msg).toBeVisible({ timeout: 10_000 });
+  await expect(msg).toHaveClass(/error/);
+});
+
+test('subscribes successfully to a repo that has no releases yet', async ({ page }) => {
+  await page.fill('#email', 'user@example.com');
+  await page.fill('#repo', 'owner/noreleases');
+  await page.click('#submit-btn');
+
+  const msg = page.locator('#message');
+  await expect(msg).toBeVisible({ timeout: 10_000 });
+  await expect(msg).toHaveClass(/success/);
+  await expect(msg).toContainText('Check your email');
+});
