@@ -4,11 +4,14 @@ import { getLatestRelease } from '../services/github.js';
 import { sendReleaseNotification } from '../services/email.js';
 import { config } from '../config.js';
 import { AppError } from '../shared/appError.js';
-import { scansTotal } from '../metrics.js';
+import { scansTotal, scanDurationSeconds, activeSubscriptionsTotal } from '../metrics.js';
+import { logger } from '../logger.js';
 
 export function startScanner(): NodeJS.Timeout {
   const run = async () => {
+    const timer = scanDurationSeconds.startTimer();
     const repos = await getReposWithConfirmedSubscriptions();
+    activeSubscriptionsTotal.set(repos.length);
     for (const repo of repos) {
       try {
         const latest = await getLatestRelease(repo.repo);
@@ -21,19 +24,20 @@ export function startScanner(): NodeJS.Timeout {
         }
       } catch (err: unknown) {
         if (err instanceof AppError && err.status === 429) {
-          console.warn('GitHub rate limit hit during scan, skipping remaining repos');
+          logger.warn({ repo: repo.repo }, 'GitHub rate limit hit during scan, skipping remaining repos');
           break;
         }
-        console.error(`Error scanning ${repo.repo}:`, err);
+        logger.error({ repo: repo.repo, err }, `Error scanning ${repo.repo}`);
       }
     }
     scansTotal.inc();
+    timer();
   };
 
   const interval = setInterval(() => {
-    run().catch((err) => console.error('Scanner cycle failed:', err));
+    run().catch((err) => logger.error({ err }, 'Scanner cycle failed'));
   }, config.scanIntervalMs);
 
-  console.log(`Scanner started (interval: ${config.scanIntervalMs}ms)`);
+  logger.info({ intervalMs: config.scanIntervalMs }, 'Scanner started');
   return interval;
 }

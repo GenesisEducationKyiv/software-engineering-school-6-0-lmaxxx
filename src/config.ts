@@ -33,4 +33,6 @@ export const config = {
 
   redisUrl: process.env['REDIS_URL'] ?? null,
   redisTtlSeconds: parseInt(optional('REDIS_TTL_SECONDS', '600'), 10),
+
+  logLevel: optional('LOG_LEVEL', 'info'),
 } as const;

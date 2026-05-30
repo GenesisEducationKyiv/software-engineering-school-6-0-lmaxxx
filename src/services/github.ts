@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { config } from '../config.js';
 import { AppError } from '../shared/appError.js';
-import { githubApiCallsTotal } from '../metrics.js';
+import { githubApiCallsTotal, githubApiDurationSeconds } from '../metrics.js';
 import { getCache, setCache } from '../cache/redis.js';
 
 const BASE = 'https://api.github.com';
@@ -24,9 +24,12 @@ export async function checkRepoExists(repo: string): Promise<void> {
   if (await getCache(key) !== null) return;
 
   githubApiCallsTotal.inc({ endpoint: 'checkRepoExists' });
+  const timer = githubApiDurationSeconds.startTimer({ endpoint: 'checkRepoExists' });
   try {
     await axios.get(`${BASE}/repos/${repo}`, { headers: headers() });
+    timer();
   } catch (err) {
+    timer();
     if (axios.isAxiosError(err)) {
       if (err.response?.status === 404) {
         throw new AppError(404, 'Repository not found');
@@ -48,14 +51,17 @@ export async function getLatestRelease(repo: string): Promise<{ tag_name: string
   }
 
   githubApiCallsTotal.inc({ endpoint: 'getLatestRelease' });
+  const timer = githubApiDurationSeconds.startTimer({ endpoint: 'getLatestRelease' });
   try {
     const res = await axios.get<{ tag_name: string }>(
       `${BASE}/repos/${repo}/releases/latest`,
       { headers: headers() },
     );
+    timer();
     await setCache(key, JSON.stringify(res.data), CACHE_TTL);
     return res.data;
   } catch (err) {
+    timer();
     if (axios.isAxiosError(err)) {
       if (err.response?.status === 404) {
         await setCache(key, NULL_SENTINEL, CACHE_TTL);

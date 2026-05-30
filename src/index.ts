@@ -7,6 +7,7 @@ import { startScanner } from './scanner/index.js';
 import { pool } from './db/pool.js';
 import { redisClient } from './cache/redis.js';
 import { startGrpcServer } from './grpc/server.js';
+import { logger } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,11 +18,11 @@ async function main() {
     databaseUrl: config.databaseUrl,
     migrationsTable: 'pgmigrations',
     dir: join(__dirname, '..', 'migrations'),
-    log: console.log,
+    log: (msg: string) => logger.debug({ component: 'migration' }, msg),
   });
 
   const server = app.listen(config.port, () => {
-    console.log(`Server listening on port ${config.port}`);
+    logger.info({ port: config.port }, 'Server listening');
   });
 
   const scannerInterval = startScanner();
@@ -29,12 +30,12 @@ async function main() {
   const grpcServer = await startGrpcServer(config.grpcPort);
 
   function shutdown(signal: string) {
-    console.log(`Received ${signal}, shutting down gracefully...`);
+    logger.info({ signal }, 'Received signal, shutting down gracefully');
     clearInterval(scannerInterval);
     grpcServer?.forceShutdown();
 
     const forceExit = setTimeout(() => {
-      console.error('Forced shutdown after timeout');
+      logger.error('Forced shutdown after timeout');
       process.exit(1);
     }, 10_000);
     forceExit.unref();
@@ -42,7 +43,7 @@ async function main() {
     server.close(async () => {
       await pool.end();
       await redisClient?.quit();
-      console.log('Shutdown complete');
+      logger.info('Shutdown complete');
       clearTimeout(forceExit);
       process.exit(0);
     });
@@ -53,6 +54,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Startup failed:', err);
+  logger.fatal({ err }, 'Startup failed');
   process.exit(1);
 });
