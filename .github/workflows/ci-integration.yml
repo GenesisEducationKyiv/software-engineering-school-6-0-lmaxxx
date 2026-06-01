@@ -22,6 +22,7 @@ jobs:
 
       - run: npm run test:integration
         env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5433/github_notifier_test
           GITHUB_API_BASE_URL: http://localhost:4001
           REDIS_URL: ""
           NODE_ENV: test

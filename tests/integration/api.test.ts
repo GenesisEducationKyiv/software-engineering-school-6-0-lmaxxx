@@ -15,7 +15,7 @@ import { app } from '../../src/app.js';
 import { pool } from '../../src/db/pool.js';
 import axios from 'axios';
 
-const mockGet = vi.mocked(axios.get);
+const mockAxiosGet = vi.mocked(axios.get);
 const mockIsAxiosError = vi.mocked(axios.isAxiosError);
 
 const CONFIRM_TOKEN = '11111111-1111-1111-1111-111111111111';
@@ -49,7 +49,7 @@ async function insertSub(opts: {
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  mockGet.mockResolvedValue({ data: { full_name: 'owner/repo' }, status: 200 });
+  mockAxiosGet.mockResolvedValue({ data: { full_name: 'owner/repo' }, status: 200 });
   mockIsAxiosError.mockReturnValue(false);
   await cleanDb();
 });
@@ -58,9 +58,6 @@ afterAll(async () => {
   await pool.end();
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/subscribe
-// ---------------------------------------------------------------------------
 describe('POST /api/subscribe', () => {
   it('inserts subscription + repository row and returns 200', async () => {
     const res = await request(app)
@@ -115,8 +112,8 @@ describe('POST /api/subscribe', () => {
   });
 
   it('returns 404 when GitHub repo does not exist', async () => {
-    const err = Object.assign(new Error('Not Found'), { response: { status: 404 } });
-    mockGet.mockRejectedValueOnce(err);
+    const err = { response: { status: 404 } };
+    mockAxiosGet.mockRejectedValueOnce(err);
     mockIsAxiosError.mockReturnValue(true);
 
     const res = await request(app)
@@ -130,8 +127,8 @@ describe('POST /api/subscribe', () => {
   });
 
   it('returns 429 when GitHub rate limit is exceeded', async () => {
-    const err = Object.assign(new Error('Rate limited'), { response: { status: 429 } });
-    mockGet.mockRejectedValueOnce(err);
+    const err = { response: { status: 429 } };
+    mockAxiosGet.mockRejectedValueOnce(err);
     mockIsAxiosError.mockReturnValue(true);
 
     const res = await request(app)
@@ -152,9 +149,6 @@ describe('POST /api/subscribe', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// GET /api/confirm/:token
-// ---------------------------------------------------------------------------
 describe('GET /api/confirm/:token', () => {
   it('marks subscription confirmed and returns 200', async () => {
     await insertSub({ confirmed: false });
@@ -185,9 +179,6 @@ describe('GET /api/confirm/:token', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// GET /api/unsubscribe/:token
-// ---------------------------------------------------------------------------
 describe('GET /api/unsubscribe/:token', () => {
   it('deletes subscription and returns 200', async () => {
     await insertSub({});
@@ -213,9 +204,6 @@ describe('GET /api/unsubscribe/:token', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// GET /api/subscriptions
-// ---------------------------------------------------------------------------
 describe('GET /api/subscriptions', () => {
   it('returns only confirmed subscriptions for the email', async () => {
     await insertSub({

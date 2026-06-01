@@ -220,7 +220,7 @@ describe('GET /api/subscriptions', () => {
     const res = await request(app).get('/api/subscriptions?email=test@example.com');
 
     expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(2);
+    expect(res.body).toEqual(subs);
   });
 
   it('returns 200 with an empty array when there are no subscriptions', async () => {

@@ -10,7 +10,7 @@ test('shows success message after valid submission', async ({ page }) => {
   await page.click('#submit-btn');
 
   const msg = page.locator('#message');
-  await expect(msg).toBeVisible({ timeout: 10_000 });
+  await expect(msg).toBeVisible();
   await expect(msg).toHaveClass(/success/);
   await expect(msg).toContainText('Check your email');
 });
@@ -21,7 +21,7 @@ test('shows error message when repository does not exist', async ({ page }) => {
   await page.click('#submit-btn');
 
   const msg = page.locator('#message');
-  await expect(msg).toBeVisible({ timeout: 10_000 });
+  await expect(msg).toBeVisible();
   await expect(msg).toHaveClass(/error/);
 });
 
@@ -44,7 +44,7 @@ test('disables submit button during request and re-enables on completion', async
 
   await btn.click();
   await expect(btn).toBeDisabled();
-  await expect(btn).toBeEnabled({ timeout: 8_000 });
+  await expect(btn).toBeEnabled();
 });
 
 test('shows error message for invalid repo format', async ({ page }) => {
@@ -53,7 +53,7 @@ test('shows error message for invalid repo format', async ({ page }) => {
   await page.click('#submit-btn');
 
   const msg = page.locator('#message');
-  await expect(msg).toBeVisible({ timeout: 10_000 });
+  await expect(msg).toBeVisible();
   await expect(msg).toHaveClass(/error/);
 });
 
@@ -63,7 +63,7 @@ test('shows error message when GitHub rate limit is exceeded', async ({ page }) 
   await page.click('#submit-btn');
 
   const msg = page.locator('#message');
-  await expect(msg).toBeVisible({ timeout: 10_000 });
+  await expect(msg).toBeVisible();
   await expect(msg).toHaveClass(/error/);
 });
 
@@ -73,7 +73,7 @@ test('subscribes successfully to a repo that has no releases yet', async ({ page
   await page.click('#submit-btn');
 
   const msg = page.locator('#message');
-  await expect(msg).toBeVisible({ timeout: 10_000 });
+  await expect(msg).toBeVisible();
   await expect(msg).toHaveClass(/success/);
   await expect(msg).toContainText('Check your email');
 });
