@@ -1,9 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { findConfirmedByEmail } from '../db/subscriptions.js';
+import { getSubscriptionsByEmail } from '../services/subscription.js';
 import { AppError } from '../shared/appError.js';
+import { EMAIL_REGEX } from '../shared/validation.js';
 
 const router = Router();
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -14,7 +14,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     if (!EMAIL_REGEX.test(email.trim())) {
       throw new AppError(400, 'Invalid email format');
     }
-    const subscriptions = await findConfirmedByEmail(email.trim());
+    const subscriptions = await getSubscriptionsByEmail(email.trim());
     res.json(subscriptions);
   } catch (err) {
     next(err);

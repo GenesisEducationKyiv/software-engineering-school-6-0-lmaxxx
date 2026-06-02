@@ -2,11 +2,12 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import { createSubscription, confirmSubscription, unsubscribeUser } from '../services/subscription.js';
-import { findConfirmedByEmail } from '../db/subscriptions.js';
+import { createSubscription, confirmSubscription, unsubscribeUser, getSubscriptionsByEmail } from '../services/subscription.js';
 import { AppError } from '../shared/appError.js';
 import { logger } from '../logger.js';
 import { grpcRequestsTotal, grpcRequestDurationSeconds } from '../metrics.js';
+import { EMAIL_REGEX } from '../shared/validation.js';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -85,14 +86,13 @@ interface SubscriptionItem   {
 }
 interface GetSubsResponse    { subscriptions: SubscriptionItem[] }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 async function subscribe(
   call: grpc.ServerUnaryCall<SubscribeRequest, MessageResponse>,
   callback: grpc.sendUnaryData<MessageResponse>,
 ): Promise<void> {
   const { email, repo } = call.request;
-  if (!email || !EMAIL_RE.test(email)) {
+  if (!email || !EMAIL_REGEX.test(email)) {
     return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid or missing email' });
   }
   if (!repo) {
@@ -143,11 +143,11 @@ async function getSubscriptionsHandler(
   callback: grpc.sendUnaryData<GetSubsResponse>,
 ): Promise<void> {
   const { email } = call.request;
-  if (!email || !EMAIL_RE.test(email)) {
+  if (!email || !EMAIL_REGEX.test(email)) {
     return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid or missing email' });
   }
   try {
-    const rows = await findConfirmedByEmail(email.trim());
+    const rows = await getSubscriptionsByEmail(email.trim());
     const subscriptions: SubscriptionItem[] = rows.map((s) => ({
       email:         s.email,
       repo:          s.repo,
