@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 
-vi.mock('../../src/db/subscriptions.js');
-vi.mock('../../src/db/repositories.js');
-vi.mock('../../src/services/github.js');
-vi.mock('../../src/services/email.js');
+vi.mock('../../src/modules/subscription/subscription.repository.js');
+vi.mock('../../src/modules/repository/repository.repository.js');
+vi.mock('../../src/modules/github/github.service.js');
+vi.mock('../../src/infra/mailer.js');
 
 import { app } from '../../src/app.js';
 import {
@@ -16,10 +16,10 @@ import {
   findByUnsubscribeToken,
   deleteSubscription,
   findConfirmedByEmail,
-} from '../../src/db/subscriptions.js';
-import { upsertRepository } from '../../src/db/repositories.js';
-import { checkRepoExists } from '../../src/services/github.js';
-import { sendConfirmationEmail } from '../../src/services/email.js';
+} from '../../src/modules/subscription/subscription.repository.js';
+import { upsertRepository } from '../../src/modules/repository/repository.repository.js';
+import { checkRepoExists } from '../../src/modules/github/github.service.js';
+import { sendConfirmationEmail } from '../../src/infra/mailer.js';
 import { AppError } from '../../src/shared/appError.js';
 import type { Subscription, SubscriptionResponse } from '../../src/types.js';
 

@@ -2,9 +2,14 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import { createSubscription, confirmSubscription, unsubscribeUser, getSubscriptionsByEmail } from '../services/subscription.js';
+import {
+  createSubscription,
+  confirmSubscription,
+  unsubscribeUser,
+  getSubscriptionsByEmail,
+} from '../modules/subscription/index.js';
 import { AppError } from '../shared/appError.js';
-import { EMAIL_REGEX } from '../shared/validation.js';
+import { EMAIL_REGEX } from '../validators/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

@@ -3,10 +3,10 @@ import { dirname, join } from 'path';
 import { runner as migrate } from 'node-pg-migrate';
 import { config } from './config.js';
 import { app } from './app.js';
-import { startScanner } from './scanner/index.js';
-import { pool } from './db/pool.js';
-import { redisClient } from './cache/redis.js';
-import { startGrpcServer } from './grpc/server.js';
+import { startScanner } from './modules/repository/index.js';
+import { pool } from './infra/db/pool.js';
+import { redisClient } from './infra/cache/redis.js';
+import { startGrpcServer } from './interfaces/grpc.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

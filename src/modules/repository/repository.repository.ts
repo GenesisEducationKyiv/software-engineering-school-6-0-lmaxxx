@@ -1,5 +1,5 @@
-import { pool } from './pool.js';
-import type { Repository } from '../types.js';
+import { pool } from '../../infra/db/pool.js';
+import type { Repository } from '../../types.js';
 
 export async function upsertRepository(repo: string): Promise<void> {
   await pool.query(

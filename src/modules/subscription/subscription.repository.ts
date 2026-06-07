@@ -1,5 +1,5 @@
-import { pool } from './pool.js';
-import type { Subscription, SubscriptionResponse } from '../types.js';
+import { pool } from '../../infra/db/pool.js';
+import type { Subscription, SubscriptionResponse } from '../../types.js';
 
 export async function findByEmailAndRepo(
   email: string,
