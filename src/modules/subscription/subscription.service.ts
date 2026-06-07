@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
-import { AppError } from '../shared/appError.js';
-import { checkRepoExists } from './github.js';
-import { sendConfirmationEmail } from './email.js';
+import { AppError } from '../../shared/appError.js';
+import { checkRepoExists } from '../github/index.js';
+import { sendConfirmationEmail } from '../../infra/mailer.js';
 import {
   findByEmailAndRepo,
   findByConfirmToken,
@@ -11,14 +11,11 @@ import {
   updateConfirmToken,
   deleteSubscription,
   findConfirmedByEmail,
-} from '../db/subscriptions.js';
-import { upsertRepository } from '../db/repositories.js';
-import type { SubscriptionResponse } from '../types.js';
+} from './subscription.repository.js';
+import { REPO_REGEX, UUID_REGEX } from '../../validators/index.js';
+import type { SubscriptionResponse } from '../../types.js';
 
 export { AppError };
-
-const REPO_REGEX = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function validateRepoFormat(repo: string): boolean {
   return REPO_REGEX.test(repo);
@@ -37,7 +34,6 @@ export async function createSubscription(email: string, repo: string): Promise<v
     if (existing.confirmed) {
       throw new AppError(409, 'Already subscribed to this repository');
     }
-    // Not confirmed — resend confirmation with a fresh token
     const newToken = uuidv4();
     await updateConfirmToken(existing.id, newToken);
     await sendConfirmationEmail(email, repo, newToken);
@@ -48,7 +44,6 @@ export async function createSubscription(email: string, repo: string): Promise<v
   const unsubscribeToken = uuidv4();
 
   await insertSubscription(email, repo, confirmToken, unsubscribeToken);
-  await upsertRepository(repo);
   await sendConfirmationEmail(email, repo, confirmToken);
 }
 
@@ -77,4 +72,3 @@ export async function unsubscribeUser(token: string): Promise<void> {
 export async function getSubscriptionsByEmail(email: string): Promise<SubscriptionResponse[]> {
   return findConfirmedByEmail(email);
 }
-

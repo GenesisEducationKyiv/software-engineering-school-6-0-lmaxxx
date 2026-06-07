@@ -1,10 +1,10 @@
-import { getReposWithConfirmedSubscriptions, updateLastSeenTag } from '../db/repositories.js';
-import { getConfirmedSubscribers } from '../db/subscriptions.js';
-import { getLatestRelease } from '../services/github.js';
-import { sendReleaseNotification } from '../services/email.js';
-import { config } from '../config.js';
-import { AppError } from '../shared/appError.js';
-import { scansTotal } from '../metrics.js';
+import { getReposWithConfirmedSubscriptions, updateLastSeenTag } from './repository.repository.js';
+import { getConfirmedSubscribers } from '../subscription/subscription.repository.js';
+import { getLatestRelease } from '../github/index.js';
+import { sendReleaseNotification } from '../../infra/mailer.js';
+import { config } from '../../config.js';
+import { AppError } from '../../shared/appError.js';
+import { scansTotal } from '../../metrics.js';
 
 export function startScanner(): NodeJS.Timeout {
   const run = async () => {

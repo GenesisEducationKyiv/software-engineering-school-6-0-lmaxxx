@@ -1,8 +1,8 @@
 import axios from 'axios';
-import { config } from '../config.js';
-import { AppError } from '../shared/appError.js';
-import { githubApiCallsTotal } from '../metrics.js';
-import { getCache, setCache } from '../cache/redis.js';
+import { config } from '../../config.js';
+import { AppError } from '../../shared/appError.js';
+import { githubApiCallsTotal } from '../../metrics.js';
+import { getCache, setCache } from '../../infra/cache/redis.js';
 
 const BASE = config.githubApiBaseUrl;
 const CACHE_TTL = config.redisTtlSeconds;

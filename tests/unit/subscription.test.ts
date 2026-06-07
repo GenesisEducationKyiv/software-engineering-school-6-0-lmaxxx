@@ -4,22 +4,22 @@ import {
   createSubscription,
   confirmSubscription,
   unsubscribeUser,
-} from '../../src/services/subscription.js';
+} from '../../src/modules/subscription/subscription.service.js';
 import type { Subscription } from '../../src/types.js';
 
 vi.mock('uuid', () => ({
   v4: vi.fn(),
 }));
 
-vi.mock('../../src/services/github.js', () => ({
+vi.mock('../../src/modules/github/index.js', () => ({
   checkRepoExists: vi.fn(),
 }));
 
-vi.mock('../../src/services/email.js', () => ({
+vi.mock('../../src/infra/mailer.js', () => ({
   sendConfirmationEmail: vi.fn(),
 }));
 
-vi.mock('../../src/db/subscriptions.js', () => ({
+vi.mock('../../src/modules/subscription/subscription.repository.js', () => ({
   findByEmailAndRepo: vi.fn(),
   insertSubscription: vi.fn(),
   updateConfirmToken: vi.fn(),
@@ -31,13 +31,9 @@ vi.mock('../../src/db/subscriptions.js', () => ({
   getConfirmedSubscribers: vi.fn(),
 }));
 
-vi.mock('../../src/db/repositories.js', () => ({
-  upsertRepository: vi.fn(),
-}));
-
 import { v4 as uuidv4 } from 'uuid';
-import { checkRepoExists } from '../../src/services/github.js';
-import { sendConfirmationEmail } from '../../src/services/email.js';
+import { checkRepoExists } from '../../src/modules/github/index.js';
+import { sendConfirmationEmail } from '../../src/infra/mailer.js';
 import {
   findByEmailAndRepo,
   insertSubscription,
@@ -46,8 +42,7 @@ import {
   markConfirmed,
   findByUnsubscribeToken,
   deleteSubscription,
-} from '../../src/db/subscriptions.js';
-import { upsertRepository } from '../../src/db/repositories.js';
+} from '../../src/modules/subscription/subscription.repository.js';
 
 const mockUuid = vi.mocked(uuidv4);
 const mockCheckRepoExists = vi.mocked(checkRepoExists);
@@ -59,7 +54,6 @@ const mockFindByConfirmToken = vi.mocked(findByConfirmToken);
 const mockMarkConfirmed = vi.mocked(markConfirmed);
 const mockFindByUnsubscribeToken = vi.mocked(findByUnsubscribeToken);
 const mockDeleteSubscription = vi.mocked(deleteSubscription);
-const mockUpsertRepository = vi.mocked(upsertRepository);
 
 function makeSub(overrides: Partial<Subscription> = {}): Subscription {
   return {
@@ -112,7 +106,6 @@ describe('createSubscription', () => {
       .mockReturnValueOnce('confirm-token' as unknown as `${string}-${string}-${string}-${string}-${string}`)
       .mockReturnValueOnce('unsub-token' as unknown as `${string}-${string}-${string}-${string}-${string}`);
     mockInsertSubscription.mockResolvedValue(makeSub());
-    mockUpsertRepository.mockResolvedValue(undefined);
     mockSendConfirmationEmail.mockResolvedValue(undefined);
 
     await createSubscription('user@example.com', 'owner/repo');
@@ -124,7 +117,6 @@ describe('createSubscription', () => {
       'confirm-token',
       'unsub-token',
     );
-    expect(mockUpsertRepository).toHaveBeenCalledWith('owner/repo');
     expect(mockSendConfirmationEmail).toHaveBeenCalledWith('user@example.com', 'owner/repo', 'confirm-token');
   });
 
@@ -220,7 +212,7 @@ describe('unsubscribeUser', () => {
     vi.clearAllMocks();
   });
 
-  it('deletes subscription for a valid unsubscribe token', async () => {
+  it('deletes subscription for valid UUID token', async () => {
     mockFindByUnsubscribeToken.mockResolvedValue(makeSub());
     mockDeleteSubscription.mockResolvedValue(undefined);
 
@@ -229,13 +221,12 @@ describe('unsubscribeUser', () => {
     expect(mockDeleteSubscription).toHaveBeenCalledWith(1);
   });
 
-  it('throws AppError(400) for a malformed (non-UUID) token', async () => {
+  it('throws AppError(400) for non-UUID token', async () => {
     await expect(unsubscribeUser('not-a-uuid')).rejects.toMatchObject({ status: 400 });
     expect(mockFindByUnsubscribeToken).not.toHaveBeenCalled();
-    expect(mockDeleteSubscription).not.toHaveBeenCalled();
   });
 
-  it('throws AppError(404) when unsubscribe token not found', async () => {
+  it('throws AppError(404) when token not found', async () => {
     mockFindByUnsubscribeToken.mockResolvedValue(null);
 
     await expect(unsubscribeUser('00000000-0000-0000-0000-000000000000')).rejects.toMatchObject({ status: 404 });

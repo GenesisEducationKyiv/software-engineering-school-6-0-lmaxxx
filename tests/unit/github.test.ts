@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import axios from 'axios';
-import { checkRepoExists, getLatestRelease } from '../../src/services/github.js';
-import { getCache, setCache } from '../../src/cache/redis.js';
+import { checkRepoExists, getLatestRelease } from '../../src/modules/github/github.service.js';
+import { getCache, setCache } from '../../src/infra/cache/redis.js';
 
 vi.mock('axios', () => ({
   default: {
@@ -18,7 +18,7 @@ vi.mock('../../src/config.js', () => ({
   },
 }));
 
-vi.mock('../../src/cache/redis.js', () => ({
+vi.mock('../../src/infra/cache/redis.js', () => ({
   redisClient: null,
   getCache: vi.fn().mockResolvedValue(null),
   setCache: vi.fn().mockResolvedValue(undefined),

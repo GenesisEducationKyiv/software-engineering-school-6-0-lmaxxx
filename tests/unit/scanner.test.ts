@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { startScanner } from '../../src/scanner/index.js';
+import { startScanner } from '../../src/modules/repository/scanner.js';
 import type { Repository, Subscription } from '../../src/types.js';
 
 vi.mock('../../src/config.js', () => ({
@@ -8,27 +8,31 @@ vi.mock('../../src/config.js', () => ({
   },
 }));
 
-vi.mock('../../src/db/repositories.js', () => ({
+vi.mock('../../src/modules/repository/repository.repository.js', () => ({
   getReposWithConfirmedSubscriptions: vi.fn(),
   updateLastSeenTag: vi.fn(),
 }));
 
-vi.mock('../../src/db/subscriptions.js', () => ({
+vi.mock('../../src/modules/subscription/subscription.repository.js', () => ({
   getConfirmedSubscribers: vi.fn(),
 }));
 
-vi.mock('../../src/services/github.js', () => ({
+vi.mock('../../src/modules/github/index.js', () => ({
   getLatestRelease: vi.fn(),
 }));
 
-vi.mock('../../src/services/email.js', () => ({
+vi.mock('../../src/infra/mailer.js', () => ({
   sendReleaseNotification: vi.fn(),
 }));
 
-import { getReposWithConfirmedSubscriptions, updateLastSeenTag } from '../../src/db/repositories.js';
-import { getConfirmedSubscribers } from '../../src/db/subscriptions.js';
-import { getLatestRelease } from '../../src/services/github.js';
-import { sendReleaseNotification } from '../../src/services/email.js';
+vi.mock('../../src/metrics.js', () => ({
+  scansTotal: { inc: vi.fn() },
+}));
+
+import { getReposWithConfirmedSubscriptions, updateLastSeenTag } from '../../src/modules/repository/repository.repository.js';
+import { getConfirmedSubscribers } from '../../src/modules/subscription/subscription.repository.js';
+import { getLatestRelease } from '../../src/modules/github/index.js';
+import { sendReleaseNotification } from '../../src/infra/mailer.js';
 
 const mockGetRepos = vi.mocked(getReposWithConfirmedSubscriptions);
 const mockUpdateLastSeenTag = vi.mocked(updateLastSeenTag);
@@ -136,7 +140,6 @@ describe('startScanner', () => {
     startScanner();
     await vi.advanceTimersByTimeAsync(1000);
 
-    // Only first repo was attempted; second was never reached because loop broke
     expect(mockGetLatestRelease).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('rate limit'));
 
@@ -165,7 +168,6 @@ describe('startScanner', () => {
       expect.stringContaining('owner/repo1'),
       expect.any(Error),
     );
-    // Second repo still processed
     expect(mockUpdateLastSeenTag).toHaveBeenCalledWith(2, 'v2.1.0');
     expect(mockSendReleaseNotification).toHaveBeenCalledWith(
       subscriber.email,
