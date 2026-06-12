@@ -73,7 +73,18 @@ function withGrpcMetrics<Req, Res>(
       grpcRequestDurationSeconds.observe({ method: methodName, status: statusLabel }, dur);
       (callback as (...args: unknown[]) => void)(err, value, ...rest);
     };
-    await handler(call, wrappedCb);
+
+    try {
+      await handler(call, wrappedCb);
+    } catch (err) {
+      const dur = Number(process.hrtime.bigint() - start) / 1e9;
+      grpcRequestsTotal.inc({ method: methodName, status: 'INTERNAL' });
+      grpcRequestDurationSeconds.observe({ method: methodName, status: 'INTERNAL' }, dur);
+      callback({
+        code: grpc.status.INTERNAL,
+        message: err instanceof Error ? err.message : 'Internal server error',
+      });
+    }
   };
 }
 
