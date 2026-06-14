@@ -1,7 +1,7 @@
 import { getReposWithConfirmedSubscriptions, updateLastSeenTag } from './repository.repository.js';
-import { getConfirmedSubscribers } from '../subscription/subscription.repository.js';
 import { getLatestRelease } from '../github/index.js';
-import { sendReleaseNotification } from '../../infra/mailer.js';
+import { getBus } from '../../infra/messaging/index.js';
+import { RoutingKeys } from '../../shared/events.js';
 import { config } from '../../config.js';
 import { AppError } from '../../shared/appError.js';
 import { scansTotal } from '../../metrics.js';
@@ -14,10 +14,10 @@ export function startScanner(): NodeJS.Timeout {
         const latest = await getLatestRelease(repo.repo);
         if (latest && latest.tag_name !== repo.last_seen_tag) {
           await updateLastSeenTag(repo.id, latest.tag_name);
-          const subscribers = await getConfirmedSubscribers(repo.repo);
-          for (const sub of subscribers) {
-            await sendReleaseNotification(sub.email, repo.repo, latest.tag_name, sub.unsubscribe_token);
-          }
+          await getBus().publish(RoutingKeys.ReleasePublished, {
+            repo: repo.repo,
+            tag: latest.tag_name,
+          });
         }
       } catch (err: unknown) {
         if (err instanceof AppError && err.status === 429) {
