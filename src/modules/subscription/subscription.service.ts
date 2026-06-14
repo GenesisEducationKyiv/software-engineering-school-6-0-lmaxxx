@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import { AppError } from '../../shared/appError.js';
 import { checkRepoExists } from '../github/index.js';
-import { sendConfirmationEmail } from '../../infra/mailer.js';
+import { getBus } from '../../infra/messaging/index.js';
+import { RoutingKeys } from '../../shared/events.js';
 import {
   findByEmailAndRepo,
   findByConfirmToken,
@@ -36,7 +37,11 @@ export async function createSubscription(email: string, repo: string): Promise<v
     }
     const newToken = uuidv4();
     await updateConfirmToken(existing.id, newToken);
-    await sendConfirmationEmail(email, repo, newToken);
+    await getBus().publish(RoutingKeys.SubscriptionCreated, {
+      email,
+      repo,
+      confirmToken: newToken,
+    });
     return;
   }
 
@@ -44,7 +49,7 @@ export async function createSubscription(email: string, repo: string): Promise<v
   const unsubscribeToken = uuidv4();
 
   await insertSubscription(email, repo, confirmToken, unsubscribeToken);
-  await sendConfirmationEmail(email, repo, confirmToken);
+  await getBus().publish(RoutingKeys.SubscriptionCreated, { email, repo, confirmToken });
 }
 
 export async function confirmSubscription(token: string): Promise<void> {
