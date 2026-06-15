@@ -31,6 +31,8 @@ export const config = {
 
   baseUrl: optional('BASE_URL', 'http://localhost:3000'),
 
+  githubApiBaseUrl: optional('GITHUB_API_BASE_URL', 'https://api.github.com'),
+
   redisUrl: process.env['REDIS_URL'] ?? null,
   redisTtlSeconds: parseInt(optional('REDIS_TTL_SECONDS', '600'), 10),
 } as const;
