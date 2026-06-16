@@ -2,12 +2,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import {
-  createSubscription,
-  confirmSubscription,
-  unsubscribeUser,
-  getSubscriptionsByEmail,
-} from '../modules/subscription/index.js';
+import type { SubscriptionService } from '../modules/subscription/index.js';
 import { AppError } from '../shared/appError.js';
 import { EMAIL_REGEX } from '../validators/index.js';
 
@@ -62,80 +57,81 @@ interface SubscriptionItem   {
 interface GetSubsResponse    { subscriptions: SubscriptionItem[] }
 
 
-async function subscribe(
-  call: grpc.ServerUnaryCall<SubscribeRequest, MessageResponse>,
-  callback: grpc.sendUnaryData<MessageResponse>,
-): Promise<void> {
-  const { email, repo } = call.request;
-  if (!email || !EMAIL_REGEX.test(email)) {
-    return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid or missing email' });
+/** Builds the gRPC server around an injected subscription service. */
+export function createGrpcServer(service: SubscriptionService): grpc.Server {
+  async function subscribe(
+    call: grpc.ServerUnaryCall<SubscribeRequest, MessageResponse>,
+    callback: grpc.sendUnaryData<MessageResponse>,
+  ): Promise<void> {
+    const { email, repo } = call.request;
+    if (!email || !EMAIL_REGEX.test(email)) {
+      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid or missing email' });
+    }
+    if (!repo) {
+      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'repo is required' });
+    }
+    try {
+      await service.subscribe(email, repo);
+      callback(null, { message: 'Confirmation email sent' });
+    } catch (err) {
+      handleError(err, callback);
+    }
   }
-  if (!repo) {
-    return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'repo is required' });
-  }
-  try {
-    await createSubscription(email, repo);
-    callback(null, { message: 'Confirmation email sent' });
-  } catch (err) {
-    handleError(err, callback);
-  }
-}
 
-async function confirmSubscriptionHandler(
-  call: grpc.ServerUnaryCall<TokenRequest, MessageResponse>,
-  callback: grpc.sendUnaryData<MessageResponse>,
-): Promise<void> {
-  const { token } = call.request;
-  if (!token) {
-    return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'token is required' });
+  async function confirmSubscriptionHandler(
+    call: grpc.ServerUnaryCall<TokenRequest, MessageResponse>,
+    callback: grpc.sendUnaryData<MessageResponse>,
+  ): Promise<void> {
+    const { token } = call.request;
+    if (!token) {
+      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'token is required' });
+    }
+    try {
+      await service.confirm(token);
+      callback(null, { message: 'Subscription confirmed' });
+    } catch (err) {
+      handleError(err, callback);
+    }
   }
-  try {
-    await confirmSubscription(token);
-    callback(null, { message: 'Subscription confirmed' });
-  } catch (err) {
-    handleError(err, callback);
-  }
-}
 
-async function unsubscribeHandler(
-  call: grpc.ServerUnaryCall<TokenRequest, MessageResponse>,
-  callback: grpc.sendUnaryData<MessageResponse>,
-): Promise<void> {
-  const { token } = call.request;
-  if (!token) {
-    return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'token is required' });
+  async function unsubscribeHandler(
+    call: grpc.ServerUnaryCall<TokenRequest, MessageResponse>,
+    callback: grpc.sendUnaryData<MessageResponse>,
+  ): Promise<void> {
+    const { token } = call.request;
+    if (!token) {
+      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'token is required' });
+    }
+    try {
+      await service.unsubscribe(token);
+      callback(null, { message: 'Unsubscribed successfully' });
+    } catch (err) {
+      handleError(err, callback);
+    }
   }
-  try {
-    await unsubscribeUser(token);
-    callback(null, { message: 'Unsubscribed successfully' });
-  } catch (err) {
-    handleError(err, callback);
-  }
-}
 
-async function getSubscriptionsHandler(
-  call: grpc.ServerUnaryCall<GetSubsRequest, GetSubsResponse>,
-  callback: grpc.sendUnaryData<GetSubsResponse>,
-): Promise<void> {
-  const { email } = call.request;
-  if (!email || !EMAIL_REGEX.test(email)) {
-    return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid or missing email' });
+  async function getSubscriptionsHandler(
+    call: grpc.ServerUnaryCall<GetSubsRequest, GetSubsResponse>,
+    callback: grpc.sendUnaryData<GetSubsResponse>,
+  ): Promise<void> {
+    const { email } = call.request;
+    if (!email || !EMAIL_REGEX.test(email)) {
+      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid or missing email' });
+    }
+    try {
+      const rows = await service.listByEmail(email.trim());
+      const subscriptions: SubscriptionItem[] = rows.map((s) => ({
+        email:         s.email,
+        repo:          s.repo,
+        confirmed:     s.confirmed,
+        last_seen_tag: s.last_seen_tag ?? '',
+      }));
+      callback(null, { subscriptions });
+    } catch (err) {
+      handleError(err, callback);
+    }
   }
-  try {
-    const rows = await getSubscriptionsByEmail(email.trim());
-    const subscriptions: SubscriptionItem[] = rows.map((s) => ({
-      email:         s.email,
-      repo:          s.repo,
-      confirmed:     s.confirmed,
-      last_seen_tag: s.last_seen_tag ?? '',
-    }));
-    callback(null, { subscriptions });
-  } catch (err) {
-    handleError(err, callback);
-  }
-}
 
-export function createGrpcServer(): grpc.Server {
   const server = new grpc.Server();
   server.addService(proto.github_notifier.GitHubNotifier.service, {
     subscribe,
@@ -146,9 +142,12 @@ export function createGrpcServer(): grpc.Server {
   return server;
 }
 
-export function startGrpcServer(port: number): Promise<grpc.Server | null> {
+export function startGrpcServer(
+  port: number,
+  service: SubscriptionService,
+): Promise<grpc.Server | null> {
   return new Promise((resolve) => {
-    const server = createGrpcServer();
+    const server = createGrpcServer(service);
     server.bindAsync(
       `0.0.0.0:${port}`,
       grpc.ServerCredentials.createInsecure(),
