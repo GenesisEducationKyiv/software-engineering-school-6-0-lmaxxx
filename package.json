@@ -9,9 +9,17 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "dev:pretty": "tsx src/index.ts | pino-pretty",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "test": "vitest run --config vitest.config.ts",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:coverage": "vitest run --coverage --config vitest.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "npm run e2e:up && playwright test",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
+    "db:up": "docker compose -f docker-compose.integration.yml up -d --wait",
+    "db:down": "docker compose -f docker-compose.integration.yml down",
+    "e2e:up": "docker compose -f docker-compose.e2e.yml up -d --wait --build",
+    "e2e:down": "docker compose -f docker-compose.e2e.yml down",
     "lint": "eslint src/",
     "migrate": "node-pg-migrate"
   },
@@ -31,6 +39,7 @@
     "uuid": "^10.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.10",
     "@types/nodemailer": "^6.4.15",

@@ -14,6 +14,7 @@ vi.mock('../../src/config.js', () => ({
   config: {
     githubToken: '',
     redisTtlSeconds: 600,
+    githubApiBaseUrl: 'https://api.github.com',
   },
 }));
 
