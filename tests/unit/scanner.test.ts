@@ -1,172 +1,150 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { startScanner } from '../../src/modules/repository/scanner.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  createReleaseScanService,
+  type ReleaseScanService,
+} from '../../src/modules/repository/scanner.js';
 import { RoutingKeys } from '../../src/shared/events.js';
-import type { Repository } from '../../src/types.js';
-
-vi.mock('../../src/config.js', () => ({
-  config: {
-    scanIntervalMs: 1000,
-  },
-}));
+import {
+  trackedRepositoryFromRow,
+  type RepositoryRow,
+} from '../../src/modules/repository/domain/tracked-repository.js';
+import { ReleaseTag } from '../../src/modules/repository/domain/release-tag.js';
+import { parseOrThrow } from '../../src/shared/domain/parse.js';
+import { AppError } from '../../src/shared/appError.js';
+import type { ReleaseFetcher } from '../../src/modules/repository/ports/release-fetcher.js';
+import type { EventBus } from '../../src/infra/messaging/index.js';
 
 vi.mock('../../src/modules/repository/repository.repository.js', () => ({
-  getReposWithConfirmedSubscriptions: vi.fn(),
-  updateLastSeenTag: vi.fn(),
-}));
-
-vi.mock('../../src/modules/github/index.js', () => ({
-  getLatestRelease: vi.fn(),
-}));
-
-const mockPublish = vi.fn();
-vi.mock('../../src/infra/messaging/index.js', () => ({
-  getBus: () => ({ publish: mockPublish }),
+  findReposWithConfirmedSubscriptions: vi.fn(),
+  save: vi.fn(),
 }));
 
 vi.mock('../../src/metrics.js', () => ({
   scansTotal: { inc: vi.fn() },
 }));
 
-import { getReposWithConfirmedSubscriptions, updateLastSeenTag } from '../../src/modules/repository/repository.repository.js';
-import { getLatestRelease } from '../../src/modules/github/index.js';
+import {
+  findReposWithConfirmedSubscriptions,
+  save,
+} from '../../src/modules/repository/repository.repository.js';
 
-const mockGetRepos = vi.mocked(getReposWithConfirmedSubscriptions);
-const mockUpdateLastSeenTag = vi.mocked(updateLastSeenTag);
-const mockGetLatestRelease = vi.mocked(getLatestRelease);
+const mockGetRepos = vi.mocked(findReposWithConfirmedSubscriptions);
+const mockSave = vi.mocked(save);
 
-function makeRepo(overrides: Partial<Repository> = {}): Repository {
-  return {
+const tag = (v: string) => parseOrThrow(ReleaseTag, v);
+
+function makeRepo(overrides: Partial<RepositoryRow> = {}) {
+  return trackedRepositoryFromRow({
     id: 1,
     repo: 'owner/repo',
     last_seen_tag: 'v1.0.0',
     last_checked_at: null,
     ...overrides,
-  };
+  });
 }
 
-describe('startScanner', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.clearAllMocks();
+let releases: { fetchLatestTag: ReturnType<typeof vi.fn> };
+let publish: ReturnType<typeof vi.fn>;
+let service: ReleaseScanService;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  releases = { fetchLatestTag: vi.fn() };
+  publish = vi.fn().mockResolvedValue(undefined);
+  service = createReleaseScanService({
+    releases: releases as unknown as ReleaseFetcher,
+    bus: { publish } as unknown as EventBus,
   });
+});
 
-  afterEach(() => {
-    vi.clearAllTimers();
-    vi.useRealTimers();
-  });
+describe('scanOnce', () => {
+  it('saves and publishes a release.published event when a new release is detected', async () => {
+    mockGetRepos.mockResolvedValue([makeRepo({ last_seen_tag: 'v1.0.0' })]);
+    releases.fetchLatestTag.mockResolvedValue(tag('v1.1.0'));
+    mockSave.mockResolvedValue(undefined);
 
-  it('publishes a release.published event when a new release is detected', async () => {
-    const repo = makeRepo({ last_seen_tag: 'v1.0.0' });
+    await service.scanOnce();
 
-    mockGetRepos.mockResolvedValue([repo]);
-    mockGetLatestRelease.mockResolvedValue({ tag_name: 'v1.1.0' });
-    mockUpdateLastSeenTag.mockResolvedValue(undefined);
-    mockPublish.mockResolvedValue(undefined);
-
-    startScanner();
-    await vi.advanceTimersByTimeAsync(1000);
-
-    expect(mockUpdateLastSeenTag).toHaveBeenCalledWith(1, 'v1.1.0');
-    expect(mockPublish).toHaveBeenCalledWith(RoutingKeys.ReleasePublished, {
+    expect(mockSave).toHaveBeenCalledOnce();
+    expect(mockSave.mock.calls[0][0].lastSeenTag).toBe('v1.1.0');
+    expect(publish).toHaveBeenCalledWith(RoutingKeys.ReleasePublished, {
       repo: 'owner/repo',
       tag: 'v1.1.0',
     });
   });
 
-  it('does not update or publish when release tag is unchanged', async () => {
+  it('does not save or publish when release tag is unchanged', async () => {
     mockGetRepos.mockResolvedValue([makeRepo({ last_seen_tag: 'v1.0.0' })]);
-    mockGetLatestRelease.mockResolvedValue({ tag_name: 'v1.0.0' });
+    releases.fetchLatestTag.mockResolvedValue(tag('v1.0.0'));
 
-    startScanner();
-    await vi.advanceTimersByTimeAsync(1000);
+    await service.scanOnce();
 
-    expect(mockUpdateLastSeenTag).not.toHaveBeenCalled();
-    expect(mockPublish).not.toHaveBeenCalled();
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
   });
 
-  it('does not update or publish when getLatestRelease returns null', async () => {
+  it('does not save or publish when there is no latest release', async () => {
     mockGetRepos.mockResolvedValue([makeRepo()]);
-    mockGetLatestRelease.mockResolvedValue(null);
+    releases.fetchLatestTag.mockResolvedValue(null);
 
-    startScanner();
-    await vi.advanceTimersByTimeAsync(1000);
+    await service.scanOnce();
 
-    expect(mockUpdateLastSeenTag).not.toHaveBeenCalled();
-    expect(mockPublish).not.toHaveBeenCalled();
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
   });
 
-  it('makes no GitHub calls when there are no repos with confirmed subscriptions', async () => {
+  it('makes no fetches when there are no repos with confirmed subscriptions', async () => {
     mockGetRepos.mockResolvedValue([]);
 
-    startScanner();
-    await vi.advanceTimersByTimeAsync(1000);
+    await service.scanOnce();
 
-    expect(mockGetLatestRelease).not.toHaveBeenCalled();
+    expect(releases.fetchLatestTag).not.toHaveBeenCalled();
   });
 
-  it('breaks out of scan loop on GitHub rate limit (429)', async () => {
-    const { AppError } = await import('../../src/shared/appError.js');
-    const repo1 = makeRepo({ id: 1, repo: 'owner/repo1', last_seen_tag: 'v1.0.0' });
-    const repo2 = makeRepo({ id: 2, repo: 'owner/repo2', last_seen_tag: 'v2.0.0' });
-
-    mockGetRepos.mockResolvedValue([repo1, repo2]);
-    mockGetLatestRelease.mockRejectedValue(new AppError(429, 'GitHub rate limit exceeded'));
-
+  it('breaks out of the scan loop on GitHub rate limit (429)', async () => {
+    mockGetRepos.mockResolvedValue([
+      makeRepo({ id: 1, repo: 'owner/repo1', last_seen_tag: 'v1.0.0' }),
+      makeRepo({ id: 2, repo: 'owner/repo2', last_seen_tag: 'v2.0.0' }),
+    ]);
+    releases.fetchLatestTag.mockRejectedValue(new AppError(429, 'GitHub rate limit exceeded'));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    startScanner();
-    await vi.advanceTimersByTimeAsync(1000);
+    await service.scanOnce();
 
-    expect(mockGetLatestRelease).toHaveBeenCalledTimes(1);
+    expect(releases.fetchLatestTag).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('rate limit'));
-
     warnSpy.mockRestore();
   });
 
   it('logs error and continues scanning remaining repos on non-429 error', async () => {
-    const repo1 = makeRepo({ id: 1, repo: 'owner/repo1', last_seen_tag: 'v1.0.0' });
-    const repo2 = makeRepo({ id: 2, repo: 'owner/repo2', last_seen_tag: 'v2.0.0' });
-
-    mockGetRepos.mockResolvedValue([repo1, repo2]);
-    mockGetLatestRelease
+    mockGetRepos.mockResolvedValue([
+      makeRepo({ id: 1, repo: 'owner/repo1', last_seen_tag: 'v1.0.0' }),
+      makeRepo({ id: 2, repo: 'owner/repo2', last_seen_tag: 'v2.0.0' }),
+    ]);
+    releases.fetchLatestTag
       .mockRejectedValueOnce(new Error('transient network error'))
-      .mockResolvedValueOnce({ tag_name: 'v2.1.0' });
-    mockUpdateLastSeenTag.mockResolvedValue(undefined);
-    mockPublish.mockResolvedValue(undefined);
-
+      .mockResolvedValueOnce(tag('v2.1.0'));
+    mockSave.mockResolvedValue(undefined);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    startScanner();
-    await vi.advanceTimersByTimeAsync(1000);
+    await service.scanOnce();
 
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('owner/repo1'),
-      expect.any(Error),
-    );
-    expect(mockUpdateLastSeenTag).toHaveBeenCalledWith(2, 'v2.1.0');
-    expect(mockPublish).toHaveBeenCalledWith(RoutingKeys.ReleasePublished, {
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('owner/repo1'), expect.any(Error));
+    expect(mockSave.mock.calls[0][0].repo).toBe('owner/repo2');
+    expect(publish).toHaveBeenCalledWith(RoutingKeys.ReleasePublished, {
       repo: 'owner/repo2',
       tag: 'v2.1.0',
     });
-
     errorSpy.mockRestore();
   });
 
   it('publishes one event per repo regardless of subscriber count', async () => {
-    const repo = makeRepo({ last_seen_tag: 'v1.0.0' });
+    mockGetRepos.mockResolvedValue([makeRepo({ last_seen_tag: 'v1.0.0' })]);
+    releases.fetchLatestTag.mockResolvedValue(tag('v1.1.0'));
+    mockSave.mockResolvedValue(undefined);
 
-    mockGetRepos.mockResolvedValue([repo]);
-    mockGetLatestRelease.mockResolvedValue({ tag_name: 'v1.1.0' });
-    mockUpdateLastSeenTag.mockResolvedValue(undefined);
-    mockPublish.mockResolvedValue(undefined);
+    await service.scanOnce();
 
-    startScanner();
-    await vi.advanceTimersByTimeAsync(1000);
-
-    expect(mockPublish).toHaveBeenCalledTimes(1);
-    expect(mockPublish).toHaveBeenCalledWith(RoutingKeys.ReleasePublished, {
-      repo: 'owner/repo',
-      tag: 'v1.1.0',
-    });
+    expect(publish).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,23 +1,36 @@
-import { sendConfirmationEmail, sendReleaseNotification } from '../../infra/mailer.js';
-import { getConfirmedSubscribers } from '../subscription/index.js';
+import type { SubscriberDirectory } from './ports/subscriber-directory.js';
+import type { Mailer } from './ports/mailer.js';
 import type {
   ReleasePublishedEvent,
   SubscriptionCreatedEvent,
 } from '../../shared/events.js';
 
-/** A new (or re-issued) subscription needs a confirmation email. */
-export async function onSubscriptionCreated(event: SubscriptionCreatedEvent): Promise<void> {
-  await sendConfirmationEmail(event.email, event.repo, event.confirmToken);
-}
+export type NotificationHandlers = {
+  onSubscriptionCreated(event: SubscriptionCreatedEvent): Promise<void>;
+  onReleasePublished(event: ReleasePublishedEvent): Promise<void>;
+};
 
-/**
- * A repo published a new release. Look up its confirmed subscribers and notify
- * each one. Subscriber lookup goes through the subscription module's public API
- * so the event payload stays thin.
- */
-export async function onReleasePublished(event: ReleasePublishedEvent): Promise<void> {
-  const subscribers = await getConfirmedSubscribers(event.repo);
-  for (const sub of subscribers) {
-    await sendReleaseNotification(sub.email, event.repo, event.tag, sub.unsubscribe_token);
-  }
+export function createNotificationHandlers(deps: {
+  subscribers: SubscriberDirectory;
+  mailer: Mailer;
+}): NotificationHandlers {
+  const { subscribers, mailer } = deps;
+
+  return {
+    async onSubscriptionCreated(event) {
+      await mailer.sendConfirmation(event.email, event.repo, event.confirmToken);
+    },
+
+    async onReleasePublished(event) {
+      const recipients = await subscribers.confirmedSubscribers(event.repo);
+      for (const sub of recipients) {
+        await mailer.sendReleaseNotification(
+          sub.email,
+          event.repo,
+          event.tag,
+          sub.unsubscribe_token,
+        );
+      }
+    },
+  };
 }

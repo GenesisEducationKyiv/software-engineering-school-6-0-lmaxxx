@@ -2,13 +2,20 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { runner as migrate } from 'node-pg-migrate';
 import { config } from './config.js';
-import { app } from './app.js';
-import { startScanner } from './modules/repository/index.js';
+import { createApp } from './app.js';
 import { pool } from './infra/db/pool.js';
 import { redisClient } from './infra/cache/redis.js';
-import { startGrpcServer } from './interfaces/grpc.js';
 import { connectBus } from './infra/messaging/index.js';
-import { startNotificationConsumer } from './modules/notification/index.js';
+import { startGrpcServer } from './interfaces/grpc.js';
+import { createGitHubRepositoryChecker, createGitHubReleaseFetcher } from './modules/github/index.js';
+import { createSubscriptionService } from './modules/subscription/index.js';
+import { createReleaseScanService, startScanner } from './modules/repository/index.js';
+import {
+  startNotificationConsumer,
+  createNotificationHandlers,
+  createNodemailerMailer,
+  createSubscriberDirectory,
+} from './modules/notification/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,16 +29,32 @@ async function main() {
     log: console.log,
   });
 
+  // Infrastructure
   const bus = await connectBus();
-  await startNotificationConsumer(bus);
 
-  const server = app.listen(config.port, () => {
+  // Anti-corruption adapters (GitHub context)
+  const repoChecker = createGitHubRepositoryChecker();
+  const releaseFetcher = createGitHubReleaseFetcher();
+
+  // Application services
+  const subscriptionService = createSubscriptionService({ repoChecker, bus });
+  const releaseScanService = createReleaseScanService({ releases: releaseFetcher, bus });
+
+  // Notifications (downstream context)
+  const handlers = createNotificationHandlers({
+    subscribers: createSubscriberDirectory(),
+    mailer: createNodemailerMailer(),
+  });
+  await startNotificationConsumer(bus, handlers);
+
+  // Inbound adapters
+  const server = createApp(subscriptionService).listen(config.port, () => {
     console.log(`Server listening on port ${config.port}`);
   });
 
-  const scannerInterval = startScanner();
+  const scannerInterval = startScanner(releaseScanService);
 
-  const grpcServer = await startGrpcServer(config.grpcPort);
+  const grpcServer = await startGrpcServer(config.grpcPort, subscriptionService);
 
   function shutdown(signal: string) {
     console.log(`Received ${signal}, shutting down gracefully...`);

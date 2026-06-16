@@ -1,13 +1,3 @@
-export interface Subscription {
-  id: number;
-  email: string;
-  repo: string;
-  confirmed: boolean;
-  confirm_token: string;
-  unsubscribe_token: string;
-  created_at: Date;
-}
-
 export interface SubscriptionResponse {
   email: string;
   repo: string;
@@ -15,11 +5,10 @@ export interface SubscriptionResponse {
   last_seen_tag: string | null;
 }
 
-export interface Repository {
-  id: number;
-  repo: string;
-  last_seen_tag: string | null;
-  last_checked_at: Date | null;
+/** Read model: a confirmed subscriber to notify about a release. */
+export interface ConfirmedSubscriber {
+  email: string;
+  unsubscribe_token: string;
 }
 
 export interface GitHubRelease {
