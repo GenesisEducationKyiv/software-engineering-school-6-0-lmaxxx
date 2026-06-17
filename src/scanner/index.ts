@@ -9,7 +9,7 @@ import { logger } from '../logger.js';
 
 export function startScanner(): NodeJS.Timeout {
   const run = async () => {
-    const timer = scanDurationSeconds.startTimer();
+    const stopTimer = scanDurationSeconds.startTimer();
     const repos = await getReposWithConfirmedSubscriptions();
     activeSubscriptionsTotal.set(repos.length);
     for (const repo of repos) {
@@ -31,7 +31,7 @@ export function startScanner(): NodeJS.Timeout {
       }
     }
     scansTotal.inc();
-    timer();
+    stopTimer();
   };
 
   const interval = setInterval(() => {

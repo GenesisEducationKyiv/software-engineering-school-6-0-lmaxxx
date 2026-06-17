@@ -61,25 +61,23 @@ function withGrpcMetrics<Req, Res>(
     call: grpc.ServerUnaryCall<Req, Res>,
     callback: grpc.sendUnaryData<Res>,
   ): Promise<void> => {
-    const start = process.hrtime.bigint();
+    const end = grpcRequestDurationSeconds.startTimer();
     let statusLabel = 'OK';
     const wrappedCb: grpc.sendUnaryData<Res> = (err, value, ...rest) => {
       if (err) {
         const code = (err as grpc.ServiceError).code ?? grpc.status.INTERNAL;
         statusLabel = grpc.status[code] ?? 'UNKNOWN';
       }
-      const dur = Number(process.hrtime.bigint() - start) / 1e9;
       grpcRequestsTotal.inc({ method: methodName, status: statusLabel });
-      grpcRequestDurationSeconds.observe({ method: methodName, status: statusLabel }, dur);
+      end({ method: methodName, status: statusLabel });
       (callback as (...args: unknown[]) => void)(err, value, ...rest);
     };
 
     try {
       await handler(call, wrappedCb);
     } catch (err) {
-      const dur = Number(process.hrtime.bigint() - start) / 1e9;
       grpcRequestsTotal.inc({ method: methodName, status: 'INTERNAL' });
-      grpcRequestDurationSeconds.observe({ method: methodName, status: 'INTERNAL' }, dur);
+      end({ method: methodName, status: 'INTERNAL' });
       callback({
         code: grpc.status.INTERNAL,
         message: err instanceof Error ? err.message : 'Internal server error',

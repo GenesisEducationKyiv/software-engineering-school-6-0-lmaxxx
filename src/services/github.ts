@@ -27,9 +27,7 @@ export async function checkRepoExists(repo: string): Promise<void> {
   const timer = githubApiDurationSeconds.startTimer({ endpoint: 'checkRepoExists' });
   try {
     await axios.get(`${BASE}/repos/${repo}`, { headers: headers() });
-    timer();
   } catch (err) {
-    timer();
     if (axios.isAxiosError(err)) {
       if (err.response?.status === 404) {
         throw new AppError(404, 'Repository not found');
@@ -39,6 +37,8 @@ export async function checkRepoExists(repo: string): Promise<void> {
       }
     }
     throw err;
+  } finally {
+    timer();
   }
   await setCache(key, 'exists', CACHE_TTL);
 }
@@ -57,11 +57,9 @@ export async function getLatestRelease(repo: string): Promise<{ tag_name: string
       `${BASE}/repos/${repo}/releases/latest`,
       { headers: headers() },
     );
-    timer();
     await setCache(key, JSON.stringify(res.data), CACHE_TTL);
     return res.data;
   } catch (err) {
-    timer();
     if (axios.isAxiosError(err)) {
       if (err.response?.status === 404) {
         await setCache(key, NULL_SENTINEL, CACHE_TTL);
@@ -70,5 +68,7 @@ export async function getLatestRelease(repo: string): Promise<{ tag_name: string
       if (err.response?.status === 403 || err.response?.status === 429) throw new AppError(429, 'GitHub rate limit exceeded');
     }
     throw err;
+  } finally {
+    timer();
   }
 }
