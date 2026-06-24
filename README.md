@@ -46,8 +46,9 @@ setInterval fires
   └─ increment scans_total Prometheus counter
 
 The Notification module consumes `release.published`, looks up the repo's
-confirmed subscribers, and sends each a release notification email (with an
-unsubscribe link).
+confirmed subscribers, and fans out one `notification.send` message per
+subscriber. Each is consumed separately and sends a single release notification
+email (with an unsubscribe link).
 ```
 
 ### Messaging
@@ -55,12 +56,15 @@ unsubscribe link).
 ```
 exchange: domain.events   (topic, durable)
    ├─ subscription.created ─┐
-   └─ release.published ────┴─► queue: notification  ─► Notification module
+   ├─ release.published ────┼─► queue: notification  ─► Notification module
+   └─ notification.send ────┘
 ```
 
 Publishers (API, Scanner) and the consumer (Notification module) talk only
-through the broker. Messages are acked after the email is sent; a failed handler
-nacks + requeues (at-least-once delivery).
+through the broker. Messages are acked after the work succeeds; a failed handler
+nacks + requeues (at-least-once delivery). Release emails are fanned out as one
+`notification.send` per recipient, so a single failed send only requeues that
+recipient instead of re-emailing the whole subscriber list.
 
 ### Startup Sequence
 

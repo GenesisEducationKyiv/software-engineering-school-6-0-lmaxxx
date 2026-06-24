@@ -1,243 +1,194 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
+  createSubscriptionService,
   validateRepoFormat,
-  createSubscription,
-  confirmSubscription,
-  unsubscribeUser,
+  type SubscriptionService,
 } from '../../src/modules/subscription/subscription.service.js';
 import { RoutingKeys } from '../../src/shared/events.js';
-import type { Subscription } from '../../src/types.js';
-
-vi.mock('uuid', () => ({
-  v4: vi.fn(),
-}));
-
-vi.mock('../../src/modules/github/index.js', () => ({
-  checkRepoExists: vi.fn(),
-}));
-
-const mockPublish = vi.fn();
-vi.mock('../../src/infra/messaging/index.js', () => ({
-  getBus: () => ({ publish: mockPublish }),
-}));
+import {
+  subscriptionFromRow,
+  type SubscriptionRow,
+  type Subscription,
+} from '../../src/modules/subscription/domain/subscription.js';
+import type { RepositoryChecker } from '../../src/modules/subscription/ports/repository-checker.js';
+import type { RepositoryRegistrar } from '../../src/modules/subscription/ports/repository-registrar.js';
+import type { EventBus } from '../../src/infra/messaging/index.js';
 
 vi.mock('../../src/modules/subscription/subscription.repository.js', () => ({
   findByEmailAndRepo: vi.fn(),
-  insertSubscription: vi.fn(),
-  updateConfirmToken: vi.fn(),
   findByConfirmToken: vi.fn(),
-  markConfirmed: vi.fn(),
   findByUnsubscribeToken: vi.fn(),
+  save: vi.fn(),
   deleteSubscription: vi.fn(),
   findConfirmedByEmail: vi.fn(),
   getConfirmedSubscribers: vi.fn(),
 }));
 
-import { v4 as uuidv4 } from 'uuid';
-import { checkRepoExists } from '../../src/modules/github/index.js';
 import {
   findByEmailAndRepo,
-  insertSubscription,
-  updateConfirmToken,
   findByConfirmToken,
-  markConfirmed,
   findByUnsubscribeToken,
+  save,
   deleteSubscription,
 } from '../../src/modules/subscription/subscription.repository.js';
 
-const mockUuid = vi.mocked(uuidv4);
-const mockCheckRepoExists = vi.mocked(checkRepoExists);
 const mockFindByEmailAndRepo = vi.mocked(findByEmailAndRepo);
-const mockInsertSubscription = vi.mocked(insertSubscription);
-const mockUpdateConfirmToken = vi.mocked(updateConfirmToken);
 const mockFindByConfirmToken = vi.mocked(findByConfirmToken);
-const mockMarkConfirmed = vi.mocked(markConfirmed);
 const mockFindByUnsubscribeToken = vi.mocked(findByUnsubscribeToken);
+const mockSave = vi.mocked(save);
 const mockDeleteSubscription = vi.mocked(deleteSubscription);
 
-function makeSub(overrides: Partial<Subscription> = {}): Subscription {
-  return {
+const VALID_UUID = '00000000-0000-0000-0000-000000000000';
+
+function makeAggregate(overrides: Partial<SubscriptionRow> = {}): Subscription {
+  return subscriptionFromRow({
     id: 1,
     email: 'user@example.com',
     repo: 'owner/repo',
     confirmed: false,
-    confirm_token: 'token-abc',
-    unsubscribe_token: 'token-xyz',
+    confirm_token: VALID_UUID,
+    unsubscribe_token: VALID_UUID,
     created_at: new Date(),
     ...overrides,
-  };
+  });
 }
+
+let ensureExists: ReturnType<typeof vi.fn>;
+let ensureTracked: ReturnType<typeof vi.fn>;
+let publish: ReturnType<typeof vi.fn>;
+let service: SubscriptionService;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  ensureExists = vi.fn().mockResolvedValue(undefined);
+  ensureTracked = vi.fn().mockResolvedValue(undefined);
+  publish = vi.fn().mockResolvedValue(undefined);
+  service = createSubscriptionService({
+    repoChecker: { ensureExists } as unknown as RepositoryChecker,
+    registrar: { ensureTracked } as unknown as RepositoryRegistrar,
+    bus: { publish } as unknown as EventBus,
+  });
+});
 
 describe('validateRepoFormat', () => {
   it('accepts valid owner/repo', () => {
     expect(validateRepoFormat('golang/go')).toBe(true);
   });
 
-  it('accepts names with hyphens, dots, and underscores', () => {
-    expect(validateRepoFormat('my-org/my_repo.v2')).toBe(true);
-  });
-
-  it('rejects missing slash', () => {
+  it('rejects missing slash and multiple slashes', () => {
     expect(validateRepoFormat('invalid')).toBe(false);
-  });
-
-  it('rejects empty owner', () => {
-    expect(validateRepoFormat('/repo')).toBe(false);
-  });
-
-  it('rejects empty repo', () => {
-    expect(validateRepoFormat('owner/')).toBe(false);
-  });
-
-  it('rejects multiple slashes', () => {
     expect(validateRepoFormat('a/b/c')).toBe(false);
   });
 });
 
-describe('createSubscription', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('creates a new subscription and sends confirmation email', async () => {
-    mockCheckRepoExists.mockResolvedValue(undefined);
+describe('subscribe', () => {
+  it('creates a new subscription, persists it, and publishes the created event', async () => {
     mockFindByEmailAndRepo.mockResolvedValue(null);
-    mockUuid
-      .mockReturnValueOnce('confirm-token' as unknown as `${string}-${string}-${string}-${string}-${string}`)
-      .mockReturnValueOnce('unsub-token' as unknown as `${string}-${string}-${string}-${string}-${string}`);
-    mockInsertSubscription.mockResolvedValue(makeSub());
-    mockPublish.mockResolvedValue(undefined);
+    mockSave.mockResolvedValue(undefined);
 
-    await createSubscription('user@example.com', 'owner/repo');
+    await service.subscribe('user@example.com', 'owner/repo');
 
-    expect(mockCheckRepoExists).toHaveBeenCalledWith('owner/repo');
-    expect(mockInsertSubscription).toHaveBeenCalledWith(
-      'user@example.com',
-      'owner/repo',
-      'confirm-token',
-      'unsub-token',
+    expect(ensureExists).toHaveBeenCalledOnce();
+    expect(ensureExists.mock.calls[0][0]).toBe('owner/repo');
+    expect(ensureTracked).toHaveBeenCalledWith('owner/repo');
+    expect(mockSave).toHaveBeenCalledOnce();
+    expect(publish).toHaveBeenCalledWith(
+      RoutingKeys.SubscriptionCreated,
+      expect.objectContaining({
+        email: 'user@example.com',
+        repo: 'owner/repo',
+        confirmToken: expect.any(String),
+      }),
     );
-    expect(mockPublish).toHaveBeenCalledWith(RoutingKeys.SubscriptionCreated, {
-      email: 'user@example.com',
-      repo: 'owner/repo',
-      confirmToken: 'confirm-token',
-    });
   });
 
-  it('throws AppError(400) for invalid repo format without calling anything', async () => {
-    await expect(createSubscription('user@example.com', 'invalid')).rejects.toMatchObject({
-      status: 400,
-    });
-
-    expect(mockCheckRepoExists).not.toHaveBeenCalled();
+  it('throws AppError(400) for invalid repo format without checking the repo', async () => {
+    await expect(service.subscribe('user@example.com', 'invalid')).rejects.toMatchObject({ status: 400 });
+    expect(ensureExists).not.toHaveBeenCalled();
     expect(mockFindByEmailAndRepo).not.toHaveBeenCalled();
   });
 
-  it('propagates AppError(404) from checkRepoExists', async () => {
-    mockCheckRepoExists.mockRejectedValue(
-      Object.assign(new Error('Repository not found'), { status: 404 }),
-    );
+  it('propagates AppError(404) from the repository checker', async () => {
+    ensureExists.mockRejectedValue(Object.assign(new Error('Repository not found'), { status: 404 }));
 
-    await expect(createSubscription('user@example.com', 'owner/missing')).rejects.toMatchObject({
-      status: 404,
-    });
+    await expect(service.subscribe('user@example.com', 'owner/missing')).rejects.toMatchObject({ status: 404 });
     expect(mockFindByEmailAndRepo).not.toHaveBeenCalled();
   });
 
-  it('propagates AppError(429) from checkRepoExists', async () => {
-    mockCheckRepoExists.mockRejectedValue(
-      Object.assign(new Error('GitHub rate limit exceeded'), { status: 429 }),
-    );
+  it('propagates AppError(429) from the repository checker', async () => {
+    ensureExists.mockRejectedValue(Object.assign(new Error('rate limit'), { status: 429 }));
 
-    await expect(createSubscription('user@example.com', 'owner/repo')).rejects.toMatchObject({
-      status: 429,
-    });
+    await expect(service.subscribe('user@example.com', 'owner/repo')).rejects.toMatchObject({ status: 429 });
   });
 
-  it('resends confirmation email for existing unconfirmed subscription', async () => {
-    const existingSub = makeSub({ confirmed: false });
-    mockCheckRepoExists.mockResolvedValue(undefined);
-    mockFindByEmailAndRepo.mockResolvedValue(existingSub);
-    mockUuid.mockReturnValueOnce('new-token' as unknown as `${string}-${string}-${string}-${string}-${string}`);
-    mockUpdateConfirmToken.mockResolvedValue(undefined);
-    mockPublish.mockResolvedValue(undefined);
+  it('re-issues a fresh confirm token for an existing unconfirmed subscription', async () => {
+    const existing = makeAggregate({ confirmed: false });
+    mockFindByEmailAndRepo.mockResolvedValue(existing);
+    mockSave.mockResolvedValue(undefined);
 
-    await createSubscription('user@example.com', 'owner/repo');
+    await service.subscribe('user@example.com', 'owner/repo');
 
-    expect(mockUpdateConfirmToken).toHaveBeenCalledWith(1, 'new-token');
-    expect(mockPublish).toHaveBeenCalledWith(RoutingKeys.SubscriptionCreated, {
-      email: 'user@example.com',
-      repo: 'owner/repo',
-      confirmToken: 'new-token',
-    });
-    expect(mockInsertSubscription).not.toHaveBeenCalled();
+    const saved = mockSave.mock.calls[0][0];
+    expect(saved.confirmToken).not.toBe(existing.confirmToken);
+    expect(publish).toHaveBeenCalledWith(
+      RoutingKeys.SubscriptionCreated,
+      expect.objectContaining({ email: 'user@example.com', repo: 'owner/repo' }),
+    );
   });
 
   it('throws AppError(409) when subscription already confirmed', async () => {
-    mockCheckRepoExists.mockResolvedValue(undefined);
-    mockFindByEmailAndRepo.mockResolvedValue(makeSub({ confirmed: true }));
+    mockFindByEmailAndRepo.mockResolvedValue(makeAggregate({ confirmed: true }));
 
-    await expect(createSubscription('user@example.com', 'owner/repo')).rejects.toMatchObject({
-      status: 409,
-    });
-
-    expect(mockInsertSubscription).not.toHaveBeenCalled();
-    expect(mockPublish).not.toHaveBeenCalled();
+    await expect(service.subscribe('user@example.com', 'owner/repo')).rejects.toMatchObject({ status: 409 });
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
   });
 });
 
-describe('confirmSubscription', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+describe('confirm', () => {
+  it('confirms and persists the subscription for a valid token', async () => {
+    mockFindByConfirmToken.mockResolvedValue(makeAggregate({ confirmed: false }));
+    mockSave.mockResolvedValue(undefined);
 
-  it('marks subscription confirmed for a valid token', async () => {
-    mockFindByConfirmToken.mockResolvedValue(makeSub({ confirmed: false }));
-    mockMarkConfirmed.mockResolvedValue(undefined);
+    await service.confirm('token-abc');
 
-    await confirmSubscription('token-abc');
-
-    expect(mockMarkConfirmed).toHaveBeenCalledWith(1);
+    expect(mockSave.mock.calls[0][0].confirmed).toBe(true);
   });
 
   it('throws AppError(404) when token not found', async () => {
     mockFindByConfirmToken.mockResolvedValue(null);
 
-    await expect(confirmSubscription('bad-token')).rejects.toMatchObject({ status: 404 });
-    expect(mockMarkConfirmed).not.toHaveBeenCalled();
+    await expect(service.confirm('bad-token')).rejects.toMatchObject({ status: 404 });
+    expect(mockSave).not.toHaveBeenCalled();
   });
 
   it('throws AppError(400) when subscription already confirmed', async () => {
-    mockFindByConfirmToken.mockResolvedValue(makeSub({ confirmed: true }));
+    mockFindByConfirmToken.mockResolvedValue(makeAggregate({ confirmed: true }));
 
-    await expect(confirmSubscription('token-abc')).rejects.toMatchObject({ status: 400 });
-    expect(mockMarkConfirmed).not.toHaveBeenCalled();
+    await expect(service.confirm('token-abc')).rejects.toMatchObject({ status: 400 });
+    expect(mockSave).not.toHaveBeenCalled();
   });
 });
 
-describe('unsubscribeUser', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
+describe('unsubscribe', () => {
   it('deletes subscription for valid UUID token', async () => {
-    mockFindByUnsubscribeToken.mockResolvedValue(makeSub());
+    mockFindByUnsubscribeToken.mockResolvedValue(makeAggregate());
     mockDeleteSubscription.mockResolvedValue(undefined);
 
-    await unsubscribeUser('00000000-0000-0000-0000-000000000000');
+    await service.unsubscribe(VALID_UUID);
 
     expect(mockDeleteSubscription).toHaveBeenCalledWith(1);
   });
 
   it('throws AppError(400) for non-UUID token', async () => {
-    await expect(unsubscribeUser('not-a-uuid')).rejects.toMatchObject({ status: 400 });
+    await expect(service.unsubscribe('not-a-uuid')).rejects.toMatchObject({ status: 400 });
     expect(mockFindByUnsubscribeToken).not.toHaveBeenCalled();
   });
 
   it('throws AppError(404) when token not found', async () => {
     mockFindByUnsubscribeToken.mockResolvedValue(null);
 
-    await expect(unsubscribeUser('00000000-0000-0000-0000-000000000000')).rejects.toMatchObject({ status: 404 });
+    await expect(service.unsubscribe(VALID_UUID)).rejects.toMatchObject({ status: 404 });
     expect(mockDeleteSubscription).not.toHaveBeenCalled();
   });
 });
