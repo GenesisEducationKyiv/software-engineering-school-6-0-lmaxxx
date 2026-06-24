@@ -36,11 +36,14 @@ export async function findByUnsubscribeToken(token: string): Promise<Subscriptio
   return row ? subscriptionFromRow(row) : null;
 }
 
-export async function save(subscription: Subscription): Promise<void> {
+type SaveResult = number | undefined;
+
+export async function save(subscription: Subscription): Promise<SaveResult> {
   if (subscription.id === null) {
-    await pool.query(
+    const result = await pool.query<{ id: number }>(
       `INSERT INTO subscriptions (email, repo, confirm_token, unsubscribe_token)
-       VALUES ($1, $2, $3, $4)`,
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
       [
         subscription.email,
         subscription.repo,
@@ -48,17 +51,27 @@ export async function save(subscription: Subscription): Promise<void> {
         subscription.unsubscribeToken,
       ],
     );
-    return;
+    return result.rows[0].id;
   }
 
   await pool.query(
     'UPDATE subscriptions SET confirmed = $1, confirm_token = $2 WHERE id = $3',
     [subscription.confirmed, subscription.confirmToken, subscription.id],
   );
+  return;
 }
 
 export async function deleteSubscription(id: number): Promise<void> {
   await pool.query('DELETE FROM subscriptions WHERE id = $1', [id]);
+}
+
+export async function findById(id: number): Promise<Subscription | null> {
+  const result = await pool.query<SubscriptionRow>(
+    'SELECT * FROM subscriptions WHERE id = $1',
+    [id],
+  );
+  const row = result.rows[0];
+  return row ? subscriptionFromRow(row) : null;
 }
 
 export async function findConfirmedByEmail(email: string): Promise<SubscriptionResponse[]> {

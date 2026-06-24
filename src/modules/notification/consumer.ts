@@ -16,6 +16,12 @@ export async function startNotificationConsumer(
         return handlers.onReleasePublished(event.payload);
       case RoutingKeys.NotificationSend:
         return handlers.onNotificationSend(event.payload);
+      case RoutingKeys.SagaEmailSendConfirmation:
+        return handlers.onSagaEmailSendConfirmation(event.payload);
+      case RoutingKeys.EmailConfirmationSent:
+        return handlers.onEmailConfirmationSent(event.payload);
+      case RoutingKeys.EmailConfirmationFailed:
+        return handlers.onEmailConfirmationFailed(event.payload);
       default: {
         const { routingKey } = event as IncomingEvent;
         console.warn(`Notification consumer received unknown event: ${routingKey}`);
@@ -29,6 +35,9 @@ export async function startNotificationConsumer(
       RoutingKeys.SubscriptionCreated,
       RoutingKeys.ReleasePublished,
       RoutingKeys.NotificationSend,
+      RoutingKeys.SagaEmailSendConfirmation,
+      RoutingKeys.EmailConfirmationSent,
+      RoutingKeys.EmailConfirmationFailed,
     ],
     dispatch,
   );

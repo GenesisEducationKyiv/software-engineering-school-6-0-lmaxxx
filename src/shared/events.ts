@@ -11,6 +11,9 @@ export const RoutingKeys = {
   SubscriptionCreated: 'subscription.created',
   ReleasePublished: 'release.published',
   NotificationSend: 'notification.send',
+  SagaEmailSendConfirmation: 'saga.email.send_confirmation',
+  EmailConfirmationSent: 'email.confirmation.sent',
+  EmailConfirmationFailed: 'email.confirmation.failed',
 } as const;
 
 export type RoutingKey = (typeof RoutingKeys)[keyof typeof RoutingKeys];
@@ -33,9 +36,32 @@ export interface NotificationSendEvent {
   unsubscribeToken: string;
 }
 
+export interface SagaEmailSendConfirmationEvent {
+  sagaId: string;
+  email: string;
+  repo: string;
+  confirmToken: string;
+}
+
+export interface EmailConfirmationSentEvent {
+  sagaId: string;
+  email: string;
+  repo: string;
+}
+
+export interface EmailConfirmationFailedEvent {
+  sagaId: string;
+  email: string;
+  repo: string;
+  error: string;
+}
+
 /** Maps each routing key to its payload type. */
 export interface EventPayloads {
   [RoutingKeys.SubscriptionCreated]: SubscriptionCreatedEvent;
   [RoutingKeys.ReleasePublished]: ReleasePublishedEvent;
   [RoutingKeys.NotificationSend]: NotificationSendEvent;
+  [RoutingKeys.SagaEmailSendConfirmation]: SagaEmailSendConfirmationEvent;
+  [RoutingKeys.EmailConfirmationSent]: EmailConfirmationSentEvent;
+  [RoutingKeys.EmailConfirmationFailed]: EmailConfirmationFailedEvent;
 }
