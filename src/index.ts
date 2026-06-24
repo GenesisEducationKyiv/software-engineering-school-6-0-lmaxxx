@@ -9,7 +9,7 @@ import { connectBus } from './infra/messaging/index.js';
 import { startGrpcServer } from './interfaces/grpc.js';
 import { createGitHubRepositoryChecker, createGitHubReleaseFetcher } from './modules/github/index.js';
 import { createSubscriptionService } from './modules/subscription/index.js';
-import { createReleaseScanService, startScanner } from './modules/repository/index.js';
+import { createReleaseScanService, createRepositoryRegistrar, startScanner } from './modules/repository/index.js';
 import {
   startNotificationConsumer,
   createNotificationHandlers,
@@ -29,25 +29,23 @@ async function main() {
     log: console.log,
   });
 
-  // Infrastructure
   const bus = await connectBus();
 
-  // Anti-corruption adapters (GitHub context)
   const repoChecker = createGitHubRepositoryChecker();
   const releaseFetcher = createGitHubReleaseFetcher();
 
-  // Application services
-  const subscriptionService = createSubscriptionService({ repoChecker, bus });
+  const repoRegistrar = createRepositoryRegistrar();
+
+  const subscriptionService = createSubscriptionService({ repoChecker, registrar: repoRegistrar, bus });
   const releaseScanService = createReleaseScanService({ releases: releaseFetcher, bus });
 
-  // Notifications (downstream context)
   const handlers = createNotificationHandlers({
     subscribers: createSubscriberDirectory(),
     mailer: createNodemailerMailer(),
+    bus,
   });
   await startNotificationConsumer(bus, handlers);
 
-  // Inbound adapters
   const server = createApp(subscriptionService).listen(config.port, () => {
     console.log(`Server listening on port ${config.port}`);
   });

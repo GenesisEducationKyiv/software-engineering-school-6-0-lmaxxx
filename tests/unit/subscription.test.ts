@@ -11,6 +11,7 @@ import {
   type Subscription,
 } from '../../src/modules/subscription/domain/subscription.js';
 import type { RepositoryChecker } from '../../src/modules/subscription/ports/repository-checker.js';
+import type { RepositoryRegistrar } from '../../src/modules/subscription/ports/repository-registrar.js';
 import type { EventBus } from '../../src/infra/messaging/index.js';
 
 vi.mock('../../src/modules/subscription/subscription.repository.js', () => ({
@@ -53,15 +54,18 @@ function makeAggregate(overrides: Partial<SubscriptionRow> = {}): Subscription {
 }
 
 let ensureExists: ReturnType<typeof vi.fn>;
+let ensureTracked: ReturnType<typeof vi.fn>;
 let publish: ReturnType<typeof vi.fn>;
 let service: SubscriptionService;
 
 beforeEach(() => {
   vi.clearAllMocks();
   ensureExists = vi.fn().mockResolvedValue(undefined);
+  ensureTracked = vi.fn().mockResolvedValue(undefined);
   publish = vi.fn().mockResolvedValue(undefined);
   service = createSubscriptionService({
     repoChecker: { ensureExists } as unknown as RepositoryChecker,
+    registrar: { ensureTracked } as unknown as RepositoryRegistrar,
     bus: { publish } as unknown as EventBus,
   });
 });
@@ -86,6 +90,7 @@ describe('subscribe', () => {
 
     expect(ensureExists).toHaveBeenCalledOnce();
     expect(ensureExists.mock.calls[0][0]).toBe('owner/repo');
+    expect(ensureTracked).toHaveBeenCalledWith('owner/repo');
     expect(mockSave).toHaveBeenCalledOnce();
     expect(publish).toHaveBeenCalledWith(
       RoutingKeys.SubscriptionCreated,

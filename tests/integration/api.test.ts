@@ -3,7 +3,6 @@ import request from 'supertest';
 import type { Express } from 'express';
 
 vi.mock('../../src/modules/subscription/subscription.repository.js');
-vi.mock('../../src/modules/repository/repository.repository.js');
 
 import { createApp } from '../../src/app.js';
 import { createSubscriptionService } from '../../src/modules/subscription/subscription.service.js';
@@ -15,7 +14,6 @@ import {
   deleteSubscription,
   findConfirmedByEmail,
 } from '../../src/modules/subscription/subscription.repository.js';
-import { upsertRepository } from '../../src/modules/repository/repository.repository.js';
 import { RoutingKeys } from '../../src/shared/events.js';
 import { AppError } from '../../src/shared/appError.js';
 import {
@@ -23,6 +21,7 @@ import {
   type SubscriptionRow,
 } from '../../src/modules/subscription/domain/subscription.js';
 import type { RepositoryChecker } from '../../src/modules/subscription/ports/repository-checker.js';
+import type { RepositoryRegistrar } from '../../src/modules/subscription/ports/repository-registrar.js';
 import type { EventBus } from '../../src/infra/messaging/index.js';
 import type { SubscriptionResponse } from '../../src/types.js';
 
@@ -41,15 +40,18 @@ const makeSub = (overrides: Partial<SubscriptionRow> = {}) =>
   });
 
 let ensureExists: ReturnType<typeof vi.fn>;
+let ensureTracked: ReturnType<typeof vi.fn>;
 let publish: ReturnType<typeof vi.fn>;
 let app: Express;
 
 beforeEach(() => {
   vi.clearAllMocks();
   ensureExists = vi.fn().mockResolvedValue(undefined);
+  ensureTracked = vi.fn().mockResolvedValue(undefined);
   publish = vi.fn().mockResolvedValue(undefined);
   const service = createSubscriptionService({
     repoChecker: { ensureExists } as unknown as RepositoryChecker,
+    registrar: { ensureTracked } as unknown as RepositoryRegistrar,
     bus: { publish } as unknown as EventBus,
   });
   app = createApp(service);
@@ -59,7 +61,6 @@ describe('POST /api/subscribe', () => {
   it('returns 200 and sends a confirmation email for a new subscription', async () => {
     vi.mocked(findByEmailAndRepo).mockResolvedValue(null);
     vi.mocked(save).mockResolvedValue(undefined);
-    vi.mocked(upsertRepository).mockResolvedValue(undefined);
 
     const res = await request(app)
       .post('/api/subscribe')
@@ -67,6 +68,7 @@ describe('POST /api/subscribe', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ message: 'Confirmation email sent' });
+    expect(ensureTracked).toHaveBeenCalledWith('owner/repo');
     expect(publish).toHaveBeenCalledWith(
       RoutingKeys.SubscriptionCreated,
       expect.objectContaining({ email: 'test@example.com', repo: 'owner/repo' }),

@@ -12,6 +12,7 @@ import {
 import { RoutingKeys } from '../../shared/events.js';
 import { REPO_REGEX } from '../../validators/index.js';
 import type { RepositoryChecker } from './ports/repository-checker.js';
+import type { RepositoryRegistrar } from './ports/repository-registrar.js';
 import type { EventBus } from '../../infra/messaging/index.js';
 import {
   findByEmailAndRepo,
@@ -38,9 +39,10 @@ export type SubscriptionService = {
 
 export function createSubscriptionService(deps: {
   repoChecker: RepositoryChecker;
+  registrar: RepositoryRegistrar;
   bus: EventBus;
 }): SubscriptionService {
-  const { repoChecker, bus } = deps;
+  const { repoChecker, registrar, bus } = deps;
 
   function publishCreated(sub: Subscription): Promise<void> {
     return bus.publish(RoutingKeys.SubscriptionCreated, {
@@ -60,6 +62,7 @@ export function createSubscriptionService(deps: {
       const existing = await findByEmailAndRepo(email, repo);
       const sub = existing ? reissueConfirmation(existing) : createSubscription(email, repo);
       await save(sub);
+      await registrar.ensureTracked(repo);
       await publishCreated(sub);
     },
 
