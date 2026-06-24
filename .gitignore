@@ -4,3 +4,5 @@ dist/
 coverage/
 *.js.map
 .idea
+playwright-report/
+test-results/
