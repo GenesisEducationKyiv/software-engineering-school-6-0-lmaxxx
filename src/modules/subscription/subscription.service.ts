@@ -35,6 +35,12 @@ export type SubscriptionService = {
   confirm(token: string): Promise<void>;
   unsubscribe(token: string): Promise<void>;
   listByEmail(email: string): Promise<SubscriptionResponse[]>;
+  reserve(email: string, repo: string): Promise<{
+    subscriptionId: number;
+    confirmToken: Token;
+    unsubscribeToken: Token;
+  }>;
+  cancel(subscriptionId: number): Promise<void>;
 };
 
 export function createSubscriptionService(deps: {
@@ -52,10 +58,15 @@ export function createSubscriptionService(deps: {
     });
   }
 
+  function doReserve(emailInput: string, repoInput: string) {
+    const email = parseOrThrow(Email, emailInput);
+    const repo = parseOrThrow(RepoSlug, repoInput);
+    return { email, repo };
+  }
+
   return {
     async subscribe(emailInput, repoInput) {
-      const email = parseOrThrow(Email, emailInput);
-      const repo = parseOrThrow(RepoSlug, repoInput);
+      const { email, repo } = doReserve(emailInput, repoInput);
 
       await repoChecker.ensureExists(repo);
 
@@ -64,6 +75,24 @@ export function createSubscriptionService(deps: {
       await save(sub);
       await registrar.ensureTracked(repo);
       await publishCreated(sub);
+    },
+
+    async reserve(emailInput, repoInput) {
+      const { email, repo } = doReserve(emailInput, repoInput);
+
+      await repoChecker.ensureExists(repo);
+
+      const existing = await findByEmailAndRepo(email, repo);
+      const sub = existing ? reissueConfirmation(existing) : createSubscription(email, repo);
+      const newId = await save(sub);
+      const subscriptionId = existing ? existing.id! : newId!;
+      await registrar.ensureTracked(repo);
+
+      return { subscriptionId, confirmToken: sub.confirmToken!, unsubscribeToken: sub.unsubscribeToken };
+    },
+
+    async cancel(subscriptionId) {
+      await deleteSubscription(subscriptionId);
     },
 
     async confirm(token) {

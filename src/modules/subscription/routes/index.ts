@@ -2,9 +2,14 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { AppError } from '../../../shared/appError.js';
 import { EMAIL_REGEX } from '../../../validators/index.js';
 import type { SubscriptionService } from '../subscription.service.js';
+import type { SagaOrchestrator } from '../../../infra/saga/types.js';
+import { createSubscriptionSaga } from '../../sagas/index.js';
 
 /** Builds the subscription HTTP router around an injected application service. */
-export function createSubscriptionRouter(service: SubscriptionService): Router {
+export function createSubscriptionRouter(
+  service: SubscriptionService,
+  orchestrator?: SagaOrchestrator,
+): Router {
   const router = Router();
 
   router.post('/subscribe', async (req: Request, res: Response, next: NextFunction) => {
@@ -19,8 +24,13 @@ export function createSubscriptionRouter(service: SubscriptionService): Router {
       if (typeof repo !== 'string' || !repo) {
         return res.status(400).json({ error: 'repo is required' });
       }
-      await service.subscribe(email, repo);
-      res.status(200).json({ message: 'Confirmation email sent' });
+      if (orchestrator) {
+        const sagaId = await orchestrator.start(createSubscriptionSaga, { email, repo });
+        res.status(200).json({ message: 'Confirmation email sent', sagaId });
+      } else {
+        await service.subscribe(email, repo);
+        res.status(200).json({ message: 'Confirmation email sent' });
+      }
     } catch (err) {
       next(err);
     }
@@ -29,6 +39,11 @@ export function createSubscriptionRouter(service: SubscriptionService): Router {
   router.get('/confirm/:token', async (req: Request, res: Response, next: NextFunction) => {
     try {
       await service.confirm(req.params.token);
+      if (orchestrator && typeof req.query.sagaId === 'string') {
+        await orchestrator.completeStep(req.query.sagaId, 'waitConfirmation', {
+          confirmed: true,
+        });
+      }
       res.status(200).json({ message: 'Subscription confirmed' });
     } catch (err) {
       next(err);

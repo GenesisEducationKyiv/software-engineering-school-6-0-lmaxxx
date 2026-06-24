@@ -16,6 +16,11 @@ import {
   createNodemailerMailer,
   createSubscriberDirectory,
 } from './modules/notification/index.js';
+import { createSagaOrchestrator, recoverPendingSagas } from './infra/saga/index.js';
+import { getDefinition } from './modules/sagas/registry.js';
+import { createSagaReplier } from './modules/sagas/saga-replier.js';
+import { startOutboxPublisher } from './infra/messaging/outbox-publisher.js';
+import './modules/sagas/create-subscription-saga.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,14 +44,22 @@ async function main() {
   const subscriptionService = createSubscriptionService({ repoChecker, registrar: repoRegistrar, bus });
   const releaseScanService = createReleaseScanService({ releases: releaseFetcher, bus });
 
+  const sagaOrchestrator = createSagaOrchestrator(true);
+  await recoverPendingSagas(sagaOrchestrator, getDefinition);
+
+  const sagaReplier = createSagaReplier(sagaOrchestrator);
+
   const handlers = createNotificationHandlers({
     subscribers: createSubscriberDirectory(),
     mailer: createNodemailerMailer(),
     bus,
+    sagaReplier,
   });
   await startNotificationConsumer(bus, handlers);
 
-  const server = createApp(subscriptionService).listen(config.port, () => {
+  const outboxInterval = startOutboxPublisher(bus);
+
+  const server = createApp(subscriptionService, sagaOrchestrator).listen(config.port, () => {
     console.log(`Server listening on port ${config.port}`);
   });
 
@@ -57,6 +70,7 @@ async function main() {
   function shutdown(signal: string) {
     console.log(`Received ${signal}, shutting down gracefully...`);
     clearInterval(scannerInterval);
+    clearInterval(outboxInterval);
     grpcServer?.forceShutdown();
 
     const forceExit = setTimeout(() => {
