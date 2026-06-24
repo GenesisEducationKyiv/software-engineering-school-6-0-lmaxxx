@@ -14,9 +14,13 @@ export async function insertSaga(saga: {
   );
 }
 
+const SAGA_COLUMNS = `id, saga_type AS "sagaType", version, status,
+  current_step AS "currentStep", state, fail_reason AS "failReason",
+  created_at AS "createdAt", updated_at AS "updatedAt"`;
+
 export async function findSaga(id: string): Promise<SagaRecord | null> {
   const result = await pool.query<SagaRecord>(
-    'SELECT * FROM sagas WHERE id = $1',
+    `SELECT ${SAGA_COLUMNS} FROM sagas WHERE id = $1`,
     [id],
   );
   return result.rows[0] ?? null;
@@ -24,7 +28,8 @@ export async function findSaga(id: string): Promise<SagaRecord | null> {
 
 export async function findPendingSagas(): Promise<SagaRecord[]> {
   const result = await pool.query<SagaRecord>(
-    "SELECT * FROM sagas WHERE status IN ('PENDING', 'STEP_IN_PROGRESS') ORDER BY created_at",
+    `SELECT ${SAGA_COLUMNS} FROM sagas
+     WHERE status IN ('PENDING', 'STEP_IN_PROGRESS') ORDER BY created_at`,
   );
   return result.rows;
 }
@@ -63,12 +68,14 @@ export async function insertSagaStep(step: {
   stepName: string;
   stepType: 'forward' | 'compensate';
   status: StepStatus;
-}): Promise<void> {
-  await pool.query(
+}): Promise<number> {
+  const result = await pool.query<{ id: number }>(
     `INSERT INTO saga_steps (saga_id, step_index, step_name, step_type, status)
-     VALUES ($1, $2, $3, $4, $5)`,
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id`,
     [step.sagaId, step.stepIndex, step.stepName, step.stepType, step.status],
   );
+  return result.rows[0].id;
 }
 
 export async function updateSagaStepStatus(
@@ -95,12 +102,18 @@ export async function updateSagaStepStatus(
   );
 }
 
+const STEP_COLUMNS = `id, saga_id AS "sagaId", step_index AS "stepIndex",
+  step_name AS "stepName", step_type AS "stepType", status,
+  started_at AS "startedAt", finished_at AS "finishedAt", error`;
+
 export async function findStepBySagaAndName(
   sagaId: string,
   stepName: string,
 ): Promise<SagaStepRecord | null> {
   const result = await pool.query<SagaStepRecord>(
-    'SELECT * FROM saga_steps WHERE saga_id = $1 AND step_name = $2 AND step_type = \'forward\' ORDER BY step_index DESC LIMIT 1',
+    `SELECT ${STEP_COLUMNS} FROM saga_steps
+     WHERE saga_id = $1 AND step_name = $2 AND step_type = 'forward'
+     ORDER BY step_index DESC LIMIT 1`,
     [sagaId, stepName],
   );
   return result.rows[0] ?? null;
@@ -110,7 +123,9 @@ export async function findCompletedSteps(
   sagaId: string,
 ): Promise<SagaStepRecord[]> {
   const result = await pool.query<SagaStepRecord>(
-    "SELECT * FROM saga_steps WHERE saga_id = $1 AND step_type = 'forward' AND status = 'COMPLETED' ORDER BY step_index",
+    `SELECT ${STEP_COLUMNS} FROM saga_steps
+     WHERE saga_id = $1 AND step_type = 'forward' AND status = 'COMPLETED'
+     ORDER BY step_index`,
     [sagaId],
   );
   return result.rows;

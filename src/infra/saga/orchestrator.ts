@@ -17,9 +17,18 @@ import {
 import { insertOutbox } from './outbox.repository.js';
 import { getDefinition } from '../../modules/sagas/registry.js';
 
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export function createSagaOrchestrator(
   _outboxEnabled: boolean,
 ): SagaOrchestrator {
+  /**
+   * Drives the saga from its current step. LOCAL steps run synchronously and
+   * recurse into the next step. ACTION and WAIT steps dispatch/await an external
+   * signal and pause — the saga is resumed later via completeStep/failStep.
+   */
   async function executeStep(saga: SagaRecord, def: SagaDefinition): Promise<void> {
     const stepIndex = saga.currentStep;
     if (stepIndex >= def.steps.length) {
@@ -30,25 +39,27 @@ export function createSagaOrchestrator(
     const step = def.steps[stepIndex];
     const ctx: SagaContext = { sagaId: saga.id, state: { ...saga.state } };
 
-    const stepRecord = await findStepBySagaAndName(saga.id, step.name);
+    const existing = await findStepBySagaAndName(saga.id, step.name);
     let stepDbId: number;
 
-    if (stepRecord) {
-      stepDbId = stepRecord.id;
-      if (stepRecord.status === 'COMPLETED') {
-        await advanceToNext(saga, def);
+    if (existing) {
+      if (existing.status === 'COMPLETED') {
+        await updateSagaStatus(saga.id, 'STEP_IN_PROGRESS', {
+          currentStep: stepIndex + 1,
+        });
+        const advanced = await findSaga(saga.id);
+        await executeStep(advanced!, def);
         return;
       }
+      stepDbId = existing.id;
     } else {
-      await insertSagaStep({
+      stepDbId = await insertSagaStep({
         sagaId: saga.id,
         stepIndex,
         stepName: step.name,
         stepType: 'forward',
         status: 'IN_PROGRESS',
       });
-      const created = await findStepBySagaAndName(saga.id, step.name);
-      stepDbId = created!.id;
     }
 
     try {
@@ -63,21 +74,25 @@ export function createSagaOrchestrator(
         const updatedSaga = await findSaga(saga.id);
         await executeStep(updatedSaga!, def);
       } else if (step.type === 'ACTION') {
+        // Dispatch the command to the participant service, then pause.
+        // The step row stays IN_PROGRESS until the reply resumes the saga.
         await insertOutbox({
           routingKey: step.commandRoutingKey ?? `saga.command.${step.name}`,
           payload: { sagaId: saga.id, ...saga.state },
           sagaId: saga.id,
         });
-        await updateSagaStepStatus(stepDbId, 'COMPLETED');
         await updateSagaStatus(saga.id, 'STEP_IN_PROGRESS', {
-          currentStep: stepIndex + 1,
+          currentStep: stepIndex,
         });
       } else {
-        await updateSagaStepStatus(stepDbId, 'COMPLETED');
-        await updateSagaStatus(saga.id, 'STEP_IN_PROGRESS');
+        // WAIT: pause for an external signal (e.g. HTTP confirmation).
+        // The step row stays IN_PROGRESS until completeStep resumes the saga.
+        await updateSagaStatus(saga.id, 'STEP_IN_PROGRESS', {
+          currentStep: stepIndex,
+        });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errMessage(err);
       await updateSagaStepStatus(stepDbId, 'FAILED', message);
       await compensate(saga, def, message);
     }
@@ -99,39 +114,23 @@ export function createSagaOrchestrator(
       const stepDef = def.steps[stepRecord.stepIndex];
       if (!stepDef) continue;
 
-      await insertSagaStep({
+      const compStepDbId = await insertSagaStep({
         sagaId: saga.id,
         stepIndex: stepRecord.stepIndex,
         stepName: stepDef.name,
         stepType: 'compensate',
         status: 'IN_PROGRESS',
       });
-      const compStep = await findStepBySagaAndName(saga.id, stepDef.name);
-      const compStepDbId = compStep!.id;
 
       try {
         await stepDef.compensate(ctx);
         await updateSagaStepStatus(compStepDbId, 'COMPLETED');
       } catch (compErr) {
-        const compMsg = compErr instanceof Error ? compErr.message : String(compErr);
-        await updateSagaStepStatus(compStepDbId, 'FAILED', compMsg);
+        await updateSagaStepStatus(compStepDbId, 'FAILED', errMessage(compErr));
       }
     }
 
     await updateSagaStatus(saga.id, 'COMPENSATED');
-  }
-
-  async function advanceToNext(saga: SagaRecord, def: SagaDefinition): Promise<void> {
-    const nextIndex = saga.currentStep + 1;
-    if (nextIndex >= def.steps.length) {
-      await updateSagaStatus(saga.id, 'COMPLETED');
-      return;
-    }
-    await updateSagaStatus(saga.id, 'STEP_IN_PROGRESS', {
-      currentStep: nextIndex,
-    });
-    const updatedSaga = await findSaga(saga.id);
-    await executeStep(updatedSaga!, def);
   }
 
   return {
@@ -162,14 +161,14 @@ export function createSagaOrchestrator(
 
       const newState = result ? { ...saga.state, ...result } : saga.state;
       await updateSagaStatus(sagaId, 'STEP_IN_PROGRESS', {
-        currentStep: saga.currentStep,
+        currentStep: stepRecord.stepIndex + 1,
         state: newState,
       });
 
       const updatedSaga = await findSaga(sagaId);
       const def = getDefinition(saga.sagaType);
       if (def) {
-        await advanceToNext(updatedSaga!, def);
+        await executeStep(updatedSaga!, def);
       }
     },
 
@@ -195,6 +194,7 @@ export function createSagaOrchestrator(
     },
 
     async recover() {
+      // No-op: recovery of pending sagas is handled by recoverPendingSagas().
     },
   };
 }
