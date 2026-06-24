@@ -2,7 +2,6 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { AppError } from '../../../shared/appError.js';
 import { EMAIL_REGEX } from '../../../validators/index.js';
 import type { SubscriptionService } from '../subscription.service.js';
-import { upsertRepository } from '../../repository/index.js';
 
 /** Builds the subscription HTTP router around an injected application service. */
 export function createSubscriptionRouter(service: SubscriptionService): Router {
@@ -21,7 +20,6 @@ export function createSubscriptionRouter(service: SubscriptionService): Router {
         return res.status(400).json({ error: 'repo is required' });
       }
       await service.subscribe(email, repo);
-      await upsertRepository(repo);
       res.status(200).json({ message: 'Confirmation email sent' });
     } catch (err) {
       next(err);

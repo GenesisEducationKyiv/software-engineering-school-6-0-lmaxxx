@@ -14,8 +14,9 @@ export async function startNotificationConsumer(
         return handlers.onSubscriptionCreated(event.payload);
       case RoutingKeys.ReleasePublished:
         return handlers.onReleasePublished(event.payload);
+      case RoutingKeys.NotificationSend:
+        return handlers.onNotificationSend(event.payload);
       default: {
-        // Unreachable for known keys; guards against an unexpected routing key.
         const { routingKey } = event as IncomingEvent;
         console.warn(`Notification consumer received unknown event: ${routingKey}`);
       }
@@ -24,7 +25,11 @@ export async function startNotificationConsumer(
 
   await bus.subscribe(
     QUEUE,
-    [RoutingKeys.SubscriptionCreated, RoutingKeys.ReleasePublished],
+    [
+      RoutingKeys.SubscriptionCreated,
+      RoutingKeys.ReleasePublished,
+      RoutingKeys.NotificationSend,
+    ],
     dispatch,
   );
 }
