@@ -39,6 +39,7 @@ export type SubscriptionService = {
     subscriptionId: number;
     confirmToken: Token;
     unsubscribeToken: Token;
+    created: boolean;
   }>;
   cancel(subscriptionId: number): Promise<void>;
 };
@@ -88,7 +89,12 @@ export function createSubscriptionService(deps: {
       const subscriptionId = existing ? existing.id! : newId!;
       await registrar.ensureTracked(repo);
 
-      return { subscriptionId, confirmToken: sub.confirmToken!, unsubscribeToken: sub.unsubscribeToken };
+      return {
+        subscriptionId,
+        confirmToken: sub.confirmToken!,
+        unsubscribeToken: sub.unsubscribeToken,
+        created: !existing,
+      };
     },
 
     async cancel(subscriptionId) {

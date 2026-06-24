@@ -1,78 +1,68 @@
 import type { SagaDefinition, SagaContext } from '../../infra/saga/types.js';
-import { registerDefinition } from './registry.js';
-import * as subscriptionRepo from '../subscription/subscription.repository.js';
-import { createSubscription, reissueConfirmation } from '../subscription/domain/subscription.js';
-import { Email } from '../../shared/domain/email.js';
-import { RepoSlug } from '../../shared/domain/repo-slug.js';
-import { parseOrThrow } from '../../shared/domain/parse.js';
+import type { SubscriptionService } from '../subscription/subscription.service.js';
 
 export const CREATE_SUBSCRIPTION_SAGA_TYPE = 'CREATE_SUBSCRIPTION';
 
-export const createSubscriptionSaga: SagaDefinition = {
-  type: CREATE_SUBSCRIPTION_SAGA_TYPE,
-  version: 1,
-  steps: [
-    {
-      name: 'reserve',
-      type: 'LOCAL',
-      async action(ctx: SagaContext) {
-        const email = parseOrThrow(Email, ctx.state.email as string);
-        const repo = parseOrThrow(RepoSlug, ctx.state.repo as string);
-
-        const existing = await subscriptionRepo.findByEmailAndRepo(email, repo);
-        const sub = existing
-          ? reissueConfirmation(existing)
-          : createSubscription(email, repo);
-
-        const id = await subscriptionRepo.save(sub);
-        return {
-          subscriptionId: id,
-          confirmToken: sub.confirmToken,
-          unsubscribeToken: sub.unsubscribeToken,
-        };
+/**
+ * Builds the create-subscription saga around the injected SubscriptionService.
+ * The reserve/compensate steps delegate to the service so they share the same
+ * validation, repo tracking, and id handling as the non-saga subscribe path.
+ */
+export function createCreateSubscriptionSaga(
+  service: SubscriptionService,
+): SagaDefinition {
+  return {
+    type: CREATE_SUBSCRIPTION_SAGA_TYPE,
+    version: 1,
+    steps: [
+      {
+        name: 'reserve',
+        type: 'LOCAL',
+        async action(ctx: SagaContext) {
+          const r = await service.reserve(
+            ctx.state.email as string,
+            ctx.state.repo as string,
+          );
+          return {
+            subscriptionId: r.subscriptionId,
+            confirmToken: r.confirmToken,
+            unsubscribeToken: r.unsubscribeToken,
+            created: r.created,
+          };
+        },
+        async compensate(ctx: SagaContext) {
+          // Only roll back a subscription this saga actually created; a
+          // pre-existing pending row must survive a failed confirmation.
+          if (ctx.state.created === true && typeof ctx.state.subscriptionId === 'number') {
+            await service.cancel(ctx.state.subscriptionId);
+          }
+        },
       },
-      async compensate(ctx: SagaContext) {
-        const subId = ctx.state.subscriptionId;
-        if (typeof subId === 'number') {
-          await subscriptionRepo.deleteSubscription(subId);
-        }
+      {
+        name: 'sendEmail',
+        type: 'ACTION',
+        commandRoutingKey: 'saga.email.send_confirmation',
+        action(_ctx: SagaContext) {
+          return Promise.resolve({});
+        },
+        compensate(_ctx: SagaContext) {
+          console.warn(`Saga ${_ctx.sagaId}: email already sent, no compensation`);
+          return Promise.resolve();
+        },
       },
-    },
-    {
-      name: 'sendEmail',
-      type: 'ACTION',
-      commandRoutingKey: 'saga.email.send_confirmation',
-      action(_ctx: SagaContext) {
-        return Promise.resolve({});
+      {
+        name: 'waitConfirmation',
+        type: 'WAIT',
+        timeoutMs: 24 * 60 * 60 * 1000,
+        action(_ctx: SagaContext) {
+          return Promise.resolve({});
+        },
+        async compensate(ctx: SagaContext) {
+          if (ctx.state.created === true && typeof ctx.state.subscriptionId === 'number') {
+            await service.cancel(ctx.state.subscriptionId);
+          }
+        },
       },
-      compensate(_ctx: SagaContext) {
-        console.warn(`Saga ${_ctx.sagaId}: email already sent, no compensation`);
-        return Promise.resolve();
-      },
-    },
-    {
-      name: 'waitConfirmation',
-      type: 'WAIT',
-      timeoutMs: 24 * 60 * 60 * 1000,
-      async action(ctx: SagaContext) {
-        const subId = ctx.state.subscriptionId;
-        if (typeof subId !== 'number') {
-          throw new Error('Missing subscriptionId in saga state');
-        }
-        const sub = await subscriptionRepo.findById(subId);
-        if (sub && sub.confirmed) {
-          return { confirmed: true };
-        }
-        return {};
-      },
-      async compensate(ctx: SagaContext) {
-        const subId = ctx.state.subscriptionId;
-        if (typeof subId === 'number') {
-          await subscriptionRepo.deleteSubscription(subId);
-        }
-      },
-    },
-  ],
-};
-
-registerDefinition(createSubscriptionSaga);
+    ],
+  };
+}

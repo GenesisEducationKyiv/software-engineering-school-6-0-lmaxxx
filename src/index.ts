@@ -17,10 +17,10 @@ import {
   createSubscriberDirectory,
 } from './modules/notification/index.js';
 import { createSagaOrchestrator, recoverPendingSagas } from './infra/saga/index.js';
-import { getDefinition } from './modules/sagas/registry.js';
+import { getDefinition, registerDefinition } from './modules/sagas/registry.js';
+import { createCreateSubscriptionSaga } from './modules/sagas/index.js';
 import { createSagaReplier } from './modules/sagas/saga-replier.js';
 import { startOutboxPublisher } from './infra/messaging/outbox-publisher.js';
-import './modules/sagas/create-subscription-saga.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -43,6 +43,8 @@ async function main() {
 
   const subscriptionService = createSubscriptionService({ repoChecker, registrar: repoRegistrar, bus });
   const releaseScanService = createReleaseScanService({ releases: releaseFetcher, bus });
+
+  registerDefinition(createCreateSubscriptionSaga(subscriptionService));
 
   const sagaOrchestrator = createSagaOrchestrator(true);
   await recoverPendingSagas(sagaOrchestrator, getDefinition);

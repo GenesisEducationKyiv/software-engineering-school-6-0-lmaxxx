@@ -3,7 +3,7 @@ import { AppError } from '../../../shared/appError.js';
 import { EMAIL_REGEX } from '../../../validators/index.js';
 import type { SubscriptionService } from '../subscription.service.js';
 import type { SagaOrchestrator } from '../../../infra/saga/types.js';
-import { createSubscriptionSaga } from '../../sagas/index.js';
+import { getDefinition, CREATE_SUBSCRIPTION_SAGA_TYPE } from '../../sagas/index.js';
 
 /** Builds the subscription HTTP router around an injected application service. */
 export function createSubscriptionRouter(
@@ -24,8 +24,9 @@ export function createSubscriptionRouter(
       if (typeof repo !== 'string' || !repo) {
         return res.status(400).json({ error: 'repo is required' });
       }
-      if (orchestrator) {
-        const sagaId = await orchestrator.start(createSubscriptionSaga, { email, repo });
+      const def = getDefinition(CREATE_SUBSCRIPTION_SAGA_TYPE);
+      if (orchestrator && def) {
+        const sagaId = await orchestrator.start(def, { email, repo });
         res.status(200).json({ message: 'Confirmation email sent', sagaId });
       } else {
         await service.subscribe(email, repo);
