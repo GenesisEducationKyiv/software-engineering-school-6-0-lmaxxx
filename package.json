@@ -20,9 +20,12 @@
     "e2e:up": "docker compose -f docker-compose.e2e.yml up -d --wait --build",
     "e2e:down": "docker compose -f docker-compose.e2e.yml down",
     "lint": "eslint src/",
-    "migrate": "node-pg-migrate"
+    "migrate": "node-pg-migrate",
+    "proto:lint": "buf lint",
+    "proto:generate": "buf generate --path proto/repo_verification"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.12.1",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
     "amqplib": "^2.0.1",
@@ -38,6 +41,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@bufbuild/buf": "^1.71.0",
     "@playwright/test": "^1.60.0",
     "@types/amqplib": "^0.10.8",
     "@types/express": "^4.17.21",
@@ -47,8 +51,10 @@
     "@types/supertest": "^6.0.2",
     "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^1.6.0",
+    "autocannon": "^7.15.0",
     "eslint": "^9.7.0",
     "supertest": "^7.0.0",
+    "ts-proto": "^2.11.8",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.58.1",
