@@ -7,7 +7,12 @@ import { pool } from './infra/db/pool.js';
 import { redisClient } from './infra/cache/redis.js';
 import { connectBus } from './infra/messaging/index.js';
 import { startGrpcServer } from './interfaces/grpc.js';
-import { createGitHubRepositoryChecker, createGitHubReleaseFetcher } from './modules/github/index.js';
+import { startRepoVerificationServer } from './interfaces/repo-verification.server.js';
+import {
+  createGitHubRepositoryChecker,
+  createGrpcRepositoryChecker,
+  createGitHubReleaseFetcher,
+} from './modules/github/index.js';
 import { createSubscriptionService } from './modules/subscription/index.js';
 import { createReleaseScanService, createRepositoryRegistrar, startScanner } from './modules/repository/index.js';
 import {
@@ -36,7 +41,16 @@ async function main() {
 
   const bus = await connectBus();
 
-  const repoChecker = createGitHubRepositoryChecker();
+  // RepoVerificationService gRPC server wraps the GitHub REST checker; start it
+  // up front so the gRPC client adapter has something to dial.
+  const repoVerificationServer = await startRepoVerificationServer(config.repoVerificationGrpcPort);
+
+  const repoChecker =
+    config.repoChecker === 'grpc'
+      ? createGrpcRepositoryChecker(`localhost:${config.repoVerificationGrpcPort}`)
+      : createGitHubRepositoryChecker();
+  console.log(`Repo verification transport: ${config.repoChecker}`);
+
   const releaseFetcher = createGitHubReleaseFetcher();
 
   const repoRegistrar = createRepositoryRegistrar();
@@ -74,6 +88,7 @@ async function main() {
     clearInterval(scannerInterval);
     clearInterval(outboxInterval);
     grpcServer?.forceShutdown();
+    repoVerificationServer?.forceShutdown();
 
     const forceExit = setTimeout(() => {
       console.error('Forced shutdown after timeout');

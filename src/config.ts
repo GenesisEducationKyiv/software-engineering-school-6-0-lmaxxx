@@ -15,6 +15,11 @@ export const config = {
   nodeEnv: optional('NODE_ENV', 'development'),
   grpcPort: parseInt(optional('GRPC_PORT', '50051'), 10),
 
+  // Repo-existence verification transport: 'rest' (in-process axios -> GitHub)
+  // or 'grpc' (RepoVerificationService over HTTP/2 + protobuf).
+  repoChecker: optional('REPO_CHECKER', 'rest'),
+  repoVerificationGrpcPort: parseInt(optional('REPO_VERIFICATION_GRPC_PORT', '50052'), 10),
+
   databaseUrl: required('DATABASE_URL'),
 
   githubToken: process.env['GITHUB_TOKEN'] ?? null,
