@@ -35,6 +35,16 @@ vi.mock('../../src/db/repositories.js', () => ({
   upsertRepository: vi.fn(),
 }));
 
+vi.mock('../../src/logger.js', () => ({
+  logger: {
+    info:  vi.fn(),
+    warn:  vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    fatal: vi.fn(),
+  },
+}));
+
 import { v4 as uuidv4 } from 'uuid';
 import { checkRepoExists } from '../../src/services/github.js';
 import { sendConfirmationEmail } from '../../src/services/email.js';

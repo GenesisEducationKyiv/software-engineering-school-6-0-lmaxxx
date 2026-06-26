@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { config } from '../config.js';
 import { AppError } from '../shared/appError.js';
-import { githubApiCallsTotal } from '../metrics.js';
+import { githubApiCallsTotal, githubApiDurationSeconds } from '../metrics.js';
 import { getCache, setCache } from '../cache/redis.js';
 
 const BASE = config.githubApiBaseUrl;
@@ -24,6 +24,7 @@ export async function checkRepoExists(repo: string): Promise<void> {
   if (await getCache(key) !== null) return;
 
   githubApiCallsTotal.inc({ endpoint: 'checkRepoExists' });
+  const timer = githubApiDurationSeconds.startTimer({ endpoint: 'checkRepoExists' });
   try {
     await axios.get(`${BASE}/repos/${repo}`, { headers: headers() });
   } catch (err) {
@@ -36,6 +37,8 @@ export async function checkRepoExists(repo: string): Promise<void> {
       }
     }
     throw err;
+  } finally {
+    timer();
   }
   await setCache(key, 'exists', CACHE_TTL);
 }
@@ -48,6 +51,7 @@ export async function getLatestRelease(repo: string): Promise<{ tag_name: string
   }
 
   githubApiCallsTotal.inc({ endpoint: 'getLatestRelease' });
+  const timer = githubApiDurationSeconds.startTimer({ endpoint: 'getLatestRelease' });
   try {
     const res = await axios.get<{ tag_name: string }>(
       `${BASE}/repos/${repo}/releases/latest`,
@@ -64,5 +68,7 @@ export async function getLatestRelease(repo: string): Promise<{ tag_name: string
       if (err.response?.status === 403 || err.response?.status === 429) throw new AppError(429, 'GitHub rate limit exceeded');
     }
     throw err;
+  } finally {
+    timer();
   }
 }

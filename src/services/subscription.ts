@@ -13,7 +13,9 @@ import {
   findConfirmedByEmail,
 } from '../db/subscriptions.js';
 import { upsertRepository } from '../db/repositories.js';
+import { logger } from '../logger.js';
 import type { SubscriptionResponse } from '../types.js';
+
 
 export { AppError };
 
@@ -37,10 +39,10 @@ export async function createSubscription(email: string, repo: string): Promise<v
     if (existing.confirmed) {
       throw new AppError(409, 'Already subscribed to this repository');
     }
-    // Not confirmed — resend confirmation with a fresh token
     const newToken = uuidv4();
     await updateConfirmToken(existing.id, newToken);
     await sendConfirmationEmail(email, repo, newToken);
+    logger.info({ email, repo }, 'Resent confirmation email for existing unconfirmed subscription');
     return;
   }
 
@@ -50,6 +52,7 @@ export async function createSubscription(email: string, repo: string): Promise<v
   await insertSubscription(email, repo, confirmToken, unsubscribeToken);
   await upsertRepository(repo);
   await sendConfirmationEmail(email, repo, confirmToken);
+  logger.info({ email, repo }, 'New subscription created');
 }
 
 export async function confirmSubscription(token: string): Promise<void> {
@@ -61,6 +64,7 @@ export async function confirmSubscription(token: string): Promise<void> {
     throw new AppError(400, 'Subscription already confirmed');
   }
   await markConfirmed(sub.id);
+  logger.info({ token }, 'Subscription confirmed');
 }
 
 export async function unsubscribeUser(token: string): Promise<void> {
@@ -72,6 +76,7 @@ export async function unsubscribeUser(token: string): Promise<void> {
     throw new AppError(404, 'Token not found');
   }
   await deleteSubscription(sub.id);
+  logger.info({ token }, 'User unsubscribed');
 }
 
 export async function getSubscriptionsByEmail(email: string): Promise<SubscriptionResponse[]> {

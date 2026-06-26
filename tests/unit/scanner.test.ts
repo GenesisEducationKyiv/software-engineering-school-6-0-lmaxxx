@@ -8,6 +8,16 @@ vi.mock('../../src/config.js', () => ({
   },
 }));
 
+vi.mock('../../src/logger.js', () => ({
+  logger: {
+    info:  vi.fn(),
+    warn:  vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    fatal: vi.fn(),
+  },
+}));
+
 vi.mock('../../src/db/repositories.js', () => ({
   getReposWithConfirmedSubscriptions: vi.fn(),
   updateLastSeenTag: vi.fn(),
@@ -29,6 +39,9 @@ import { getReposWithConfirmedSubscriptions, updateLastSeenTag } from '../../src
 import { getConfirmedSubscribers } from '../../src/db/subscriptions.js';
 import { getLatestRelease } from '../../src/services/github.js';
 import { sendReleaseNotification } from '../../src/services/email.js';
+import { logger } from '../../src/logger.js';
+
+const mockLogger = vi.mocked(logger);
 
 const mockGetRepos = vi.mocked(getReposWithConfirmedSubscriptions);
 const mockUpdateLastSeenTag = vi.mocked(updateLastSeenTag);
@@ -131,16 +144,15 @@ describe('startScanner', () => {
     mockGetRepos.mockResolvedValue([repo1, repo2]);
     mockGetLatestRelease.mockRejectedValue(new AppError(429, 'GitHub rate limit exceeded'));
 
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
     startScanner();
     await vi.advanceTimersByTimeAsync(1000);
 
     // Only first repo was attempted; second was never reached because loop broke
     expect(mockGetLatestRelease).toHaveBeenCalledTimes(1);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('rate limit'));
-
-    warnSpy.mockRestore();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: 'owner/repo1' }),
+      expect.stringContaining('rate limit'),
+    );
   });
 
   it('logs error and continues scanning remaining repos on non-429 error', async () => {
@@ -156,14 +168,12 @@ describe('startScanner', () => {
     mockGetSubscribers.mockResolvedValue([subscriber]);
     mockSendReleaseNotification.mockResolvedValue(undefined);
 
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
     startScanner();
     await vi.advanceTimersByTimeAsync(1000);
 
-    expect(errorSpy).toHaveBeenCalledWith(
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: 'owner/repo1' }),
       expect.stringContaining('owner/repo1'),
-      expect.any(Error),
     );
     // Second repo still processed
     expect(mockUpdateLastSeenTag).toHaveBeenCalledWith(2, 'v2.1.0');
@@ -173,8 +183,6 @@ describe('startScanner', () => {
       'v2.1.0',
       'u2',
     );
-
-    errorSpy.mockRestore();
   });
 
   it('sends notifications to all confirmed subscribers of a repo', async () => {
