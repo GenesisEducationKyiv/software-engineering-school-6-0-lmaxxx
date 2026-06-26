@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import { config } from '../config.js';
 import { emailsSentTotal } from '../metrics.js';
+import { logger } from '../logger.js';
 
 const transporter = nodemailer.createTransport({
   host: config.smtp.host,
@@ -27,6 +28,7 @@ export async function sendConfirmationEmail(
     ].join('\n'),
   });
   emailsSentTotal.inc({ type: 'confirmation' });
+  logger.info({ email, repo }, 'Confirmation email sent');
 }
 
 export async function sendReleaseNotification(
@@ -50,4 +52,5 @@ export async function sendReleaseNotification(
     ].join('\n'),
   });
   emailsSentTotal.inc({ type: 'release' });
+  logger.info({ email, repo, tag }, 'Release notification email sent');
 }

@@ -31,6 +31,16 @@ vi.mock('../../src/modules/subscription/subscription.repository.js', () => ({
   getConfirmedSubscribers: vi.fn(),
 }));
 
+vi.mock('../../src/logger.js', () => ({
+  logger: {
+    info:  vi.fn(),
+    warn:  vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    fatal: vi.fn(),
+  },
+}));
+
 import { v4 as uuidv4 } from 'uuid';
 import { checkRepoExists } from '../../src/modules/github/index.js';
 import { sendConfirmationEmail } from '../../src/infra/mailer.js';

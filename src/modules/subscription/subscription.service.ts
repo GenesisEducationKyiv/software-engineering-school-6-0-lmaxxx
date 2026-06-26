@@ -13,7 +13,9 @@ import {
   findConfirmedByEmail,
 } from './subscription.repository.js';
 import { REPO_REGEX, UUID_REGEX } from '../../validators/index.js';
+import { logger } from '../../logger.js';
 import type { SubscriptionResponse } from '../../types.js';
+
 
 export { AppError };
 
@@ -37,6 +39,7 @@ export async function createSubscription(email: string, repo: string): Promise<v
     const newToken = uuidv4();
     await updateConfirmToken(existing.id, newToken);
     await sendConfirmationEmail(email, repo, newToken);
+    logger.info({ email, repo }, 'Resent confirmation email for existing unconfirmed subscription');
     return;
   }
 
@@ -45,6 +48,7 @@ export async function createSubscription(email: string, repo: string): Promise<v
 
   await insertSubscription(email, repo, confirmToken, unsubscribeToken);
   await sendConfirmationEmail(email, repo, confirmToken);
+  logger.info({ email, repo }, 'New subscription created');
 }
 
 export async function confirmSubscription(token: string): Promise<void> {
@@ -56,6 +60,7 @@ export async function confirmSubscription(token: string): Promise<void> {
     throw new AppError(400, 'Subscription already confirmed');
   }
   await markConfirmed(sub.id);
+  logger.info({ token }, 'Subscription confirmed');
 }
 
 export async function unsubscribeUser(token: string): Promise<void> {
@@ -67,6 +72,7 @@ export async function unsubscribeUser(token: string): Promise<void> {
     throw new AppError(404, 'Token not found');
   }
   await deleteSubscription(sub.id);
+  logger.info({ token }, 'User unsubscribed');
 }
 
 export async function getSubscriptionsByEmail(email: string): Promise<SubscriptionResponse[]> {

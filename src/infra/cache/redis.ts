@@ -1,14 +1,15 @@
 import { Redis } from 'ioredis';
 import { config } from '../../config.js';
+import { logger } from '../../logger.js';
 
 function createClient(): Redis | null {
   if (!config.redisUrl) {
-    console.log('REDIS_URL not set — caching disabled');
+    logger.info('Redis URL not set — caching disabled');
     return null;
   }
   const client = new Redis(config.redisUrl);
   client.on('error', (err: Error) => {
-    console.warn('Redis error (caching skipped):', err.message);
+    logger.warn({ err: err.message }, 'Redis error (caching skipped)');
   });
   return client;
 }
