@@ -26,6 +26,15 @@ services:
     ports:
       - "4001:4000"
 
+  rabbitmq-e2e:
+    image: rabbitmq:3-management
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+
   app-e2e:
     build: .
     ports:
@@ -37,10 +46,13 @@ services:
         condition: service_started
       mailhog-e2e:
         condition: service_started
+      rabbitmq-e2e:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://app:secret@postgres-e2e:5432/github_notifier_e2e
       GITHUB_API_BASE_URL: http://mock-github:4000
       REDIS_URL: ""
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq-e2e:5672
       SMTP_HOST: mailhog-e2e
       SMTP_PORT: "1025"
       SMTP_FROM: noreply@e2e.local
