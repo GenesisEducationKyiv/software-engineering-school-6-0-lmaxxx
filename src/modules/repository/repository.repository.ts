@@ -1,9 +1,6 @@
 import { pool } from '../../infra/db/pool.js';
-import {
-  type TrackedRepository,
-  type RepositoryRow,
-  trackedRepositoryFromRow,
-} from './domain/tracked-repository.js';
+import { type TrackedRepository } from './domain/tracked-repository.js';
+import { type RepositoryRow, trackedRepositoryFromRow } from './tracked-repository.mapper.js';
 
 export async function upsertRepository(repo: string): Promise<void> {
   await pool.query(
@@ -25,7 +22,7 @@ export async function findReposWithConfirmedSubscriptions(): Promise<TrackedRepo
 
 export async function save(repository: TrackedRepository): Promise<void> {
   await pool.query(
-    'UPDATE repositories SET last_seen_tag = $1, last_checked_at = NOW() WHERE id = $2',
-    [repository.lastSeenTag, repository.id],
+    'UPDATE repositories SET last_seen_tag = $1, last_checked_at = NOW() WHERE repo = $2',
+    [repository.lastSeenTag, repository.repo],
   );
 }

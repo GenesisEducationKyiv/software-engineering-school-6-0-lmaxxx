@@ -42,7 +42,7 @@ const VALID_UUID = '00000000-0000-0000-0000-000000000000';
 
 function makeAggregate(overrides: Partial<SubscriptionRow> = {}): Subscription {
   return subscriptionFromRow({
-    id: 1,
+    id: VALID_UUID,
     email: 'user@example.com',
     repo: 'owner/repo',
     confirmed: false,
@@ -90,7 +90,7 @@ describe('subscribe', () => {
 
     expect(ensureExists).toHaveBeenCalledOnce();
     expect(ensureExists.mock.calls[0][0]).toBe('owner/repo');
-    expect(ensureTracked).toHaveBeenCalledWith('owner/repo');
+    expect(ensureTracked).not.toHaveBeenCalled();
     expect(mockSave).toHaveBeenCalledOnce();
     expect(publish).toHaveBeenCalledWith(
       RoutingKeys.SubscriptionCreated,
@@ -153,6 +153,7 @@ describe('confirm', () => {
     await service.confirm('token-abc');
 
     expect(mockSave.mock.calls[0][0].confirmed).toBe(true);
+    expect(ensureTracked).toHaveBeenCalledWith('owner/repo');
   });
 
   it('throws AppError(404) when token not found', async () => {
@@ -177,7 +178,7 @@ describe('unsubscribe', () => {
 
     await service.unsubscribe(VALID_UUID);
 
-    expect(mockDeleteSubscription).toHaveBeenCalledWith(1);
+    expect(mockDeleteSubscription).toHaveBeenCalledWith(VALID_UUID);
   });
 
   it('throws AppError(400) for non-UUID token', async () => {

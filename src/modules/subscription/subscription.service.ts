@@ -22,7 +22,7 @@ import {
   deleteSubscription,
   findConfirmedByEmail,
 } from './subscription.repository.js';
-import type { SubscriptionResponse } from '../../types.js';
+import type { SubscriptionResponse } from './interfaces/http/dtos.js';
 
 export { AppError };
 
@@ -62,7 +62,6 @@ export function createSubscriptionService(deps: {
       const existing = await findByEmailAndRepo(email, repo);
       const sub = existing ? reissueConfirmation(existing) : createSubscription(email, repo);
       await save(sub);
-      await registrar.ensureTracked(repo);
       await publishCreated(sub);
     },
 
@@ -72,6 +71,7 @@ export function createSubscriptionService(deps: {
         throw new AppError(404, 'Confirmation token not found');
       }
       await save(confirmSubscription(existing));
+      await registrar.ensureTracked(existing.repo);
     },
 
     async unsubscribe(token) {
@@ -80,7 +80,7 @@ export function createSubscriptionService(deps: {
       if (!existing) {
         throw new AppError(404, 'Token not found');
       }
-      await deleteSubscription(existing.id!);
+      await deleteSubscription(existing.id);
     },
 
     listByEmail(email) {

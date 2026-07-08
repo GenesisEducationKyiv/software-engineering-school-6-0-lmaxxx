@@ -4,7 +4,8 @@ import {
   type SubscriptionRow,
   subscriptionFromRow,
 } from './domain/subscription.js';
-import type { SubscriptionResponse, ConfirmedSubscriber } from '../../types.js';
+import type { SubscriptionResponse } from './interfaces/http/dtos.js';
+import type { ConfirmedSubscriber } from '../notification/ports/subscriber-directory.js';
 
 export async function findByEmailAndRepo(
   email: string,
@@ -37,27 +38,23 @@ export async function findByUnsubscribeToken(token: string): Promise<Subscriptio
 }
 
 export async function save(subscription: Subscription): Promise<void> {
-  if (subscription.id === null) {
-    await pool.query(
-      `INSERT INTO subscriptions (email, repo, confirm_token, unsubscribe_token)
-       VALUES ($1, $2, $3, $4)`,
-      [
-        subscription.email,
-        subscription.repo,
-        subscription.confirmToken,
-        subscription.unsubscribeToken,
-      ],
-    );
-    return;
-  }
-
   await pool.query(
-    'UPDATE subscriptions SET confirmed = $1, confirm_token = $2 WHERE id = $3',
-    [subscription.confirmed, subscription.confirmToken, subscription.id],
+    `INSERT INTO subscriptions (id, email, repo, confirmed, confirm_token, unsubscribe_token, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (id) DO UPDATE SET confirmed = EXCLUDED.confirmed, confirm_token = EXCLUDED.confirm_token`,
+    [
+      subscription.id,
+      subscription.email,
+      subscription.repo,
+      subscription.confirmed,
+      subscription.confirmToken,
+      subscription.unsubscribeToken,
+      subscription.createdAt,
+    ],
   );
 }
 
-export async function deleteSubscription(id: number): Promise<void> {
+export async function deleteSubscription(id: string): Promise<void> {
   await pool.query('DELETE FROM subscriptions WHERE id = $1', [id]);
 }
 
