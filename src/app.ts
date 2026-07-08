@@ -2,7 +2,7 @@ import express, { type Express } from 'express';
 import path from 'path';
 import { errorHandler } from './middleware/errorHandler.js';
 import { metricsMiddleware } from './middleware/metricsMiddleware.js';
-import { createSubscriptionRouter } from './modules/subscription/routes/index.js';
+import { createSubscriptionRouter } from './modules/subscription/interfaces/http/index.js';
 import type { SubscriptionService } from './modules/subscription/subscription.service.js';
 import { register } from './metrics.js';
 import { fileURLToPath } from 'url';

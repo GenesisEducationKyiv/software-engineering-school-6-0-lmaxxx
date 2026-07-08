@@ -1,30 +1,7 @@
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
-import type { SubscriptionService } from '../modules/subscription/index.js';
-import { AppError } from '../shared/appError.js';
-import { EMAIL_REGEX } from '../validators/index.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const PROTO_PATH = join(__dirname, '..', '..', 'proto', 'github_notifier.proto');
-
-const packageDef = protoLoader.loadSync(PROTO_PATH, {
-  keepCase: true,
-  longs: String,
-  enums: String,
-  defaults: true,
-  oneofs: true,
-});
-
-const proto = grpc.loadPackageDefinition(packageDef) as unknown as {
-  github_notifier: {
-    GitHubNotifier: grpc.ServiceClientConstructor;
-  };
-};
-
+import { AppError } from '../../../../shared/appError.js';
+import { EMAIL_REGEX } from '../../../../validators/index.js';
+import type { SubscriptionService } from '../../subscription.service.js';
 
 function toGrpcStatus(httpStatus: number): grpc.status {
   switch (httpStatus) {
@@ -56,9 +33,8 @@ interface SubscriptionItem   {
 }
 interface GetSubsResponse    { subscriptions: SubscriptionItem[] }
 
-
-/** Builds the gRPC server around an injected subscription service. */
-export function createGrpcServer(service: SubscriptionService): grpc.Server {
+/** Builds the gRPC service implementation around an injected subscription service. */
+export function buildGrpcServiceImpl(service: SubscriptionService): grpc.UntypedServiceImplementation {
   async function subscribe(
     call: grpc.ServerUnaryCall<SubscribeRequest, MessageResponse>,
     callback: grpc.sendUnaryData<MessageResponse>,
@@ -132,34 +108,10 @@ export function createGrpcServer(service: SubscriptionService): grpc.Server {
     }
   }
 
-  const server = new grpc.Server();
-  server.addService(proto.github_notifier.GitHubNotifier.service, {
+  return {
     subscribe,
     confirmSubscription: confirmSubscriptionHandler,
     unsubscribe: unsubscribeHandler,
     getSubscriptions: getSubscriptionsHandler,
-  });
-  return server;
-}
-
-export function startGrpcServer(
-  port: number,
-  service: SubscriptionService,
-): Promise<grpc.Server | null> {
-  return new Promise((resolve) => {
-    const server = createGrpcServer(service);
-    server.bindAsync(
-      `0.0.0.0:${port}`,
-      grpc.ServerCredentials.createInsecure(),
-      (err, boundPort) => {
-        if (err) {
-          console.warn(`gRPC server failed to start on port ${port}: ${err.message}`);
-          resolve(null);
-          return;
-        }
-        console.log(`gRPC server listening on port ${boundPort}`);
-        resolve(server);
-      },
-    );
-  });
+  };
 }

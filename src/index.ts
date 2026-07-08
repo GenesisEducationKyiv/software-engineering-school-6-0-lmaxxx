@@ -6,10 +6,16 @@ import { createApp } from './app.js';
 import { pool } from './infra/db/pool.js';
 import { redisClient } from './infra/cache/redis.js';
 import { connectBus } from './infra/messaging/index.js';
-import { startGrpcServer } from './interfaces/grpc.js';
-import { createGitHubRepositoryChecker, createGitHubReleaseFetcher } from './modules/github/index.js';
+import { startGrpcServer } from './infra/grpc/index.js';
 import { createSubscriptionService } from './modules/subscription/index.js';
-import { createReleaseScanService, createRepositoryRegistrar, startScanner } from './modules/repository/index.js';
+import { buildGrpcServiceImpl } from './modules/subscription/interfaces/grpc/handlers.js';
+import {
+  createGitHubRepositoryChecker,
+  createGitHubReleaseFetcher,
+  createReleaseScanService,
+  createRepositoryRegistrar,
+  startScanner,
+} from './modules/repository/index.js';
 import {
   startNotificationConsumer,
   createNotificationHandlers,
@@ -52,7 +58,7 @@ async function main() {
 
   const scannerInterval = startScanner(releaseScanService);
 
-  const grpcServer = await startGrpcServer(config.grpcPort, subscriptionService);
+  const grpcServer = await startGrpcServer(config.grpcPort, buildGrpcServiceImpl(subscriptionService));
 
   function shutdown(signal: string) {
     console.log(`Received ${signal}, shutting down gracefully...`);

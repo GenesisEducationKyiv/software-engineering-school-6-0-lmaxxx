@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { AppError } from '../../../shared/appError.js';
-import { EMAIL_REGEX } from '../../../validators/index.js';
-import type { SubscriptionService } from '../subscription.service.js';
+import { AppError } from '../../../../shared/appError.js';
+import { EMAIL_REGEX } from '../../../../validators/index.js';
+import type { SubscriptionService } from '../../subscription.service.js';
 
 /** Builds the subscription HTTP router around an injected application service. */
 export function createSubscriptionRouter(service: SubscriptionService): Router {
