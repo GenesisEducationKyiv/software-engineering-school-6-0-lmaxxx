@@ -83,7 +83,8 @@ export function createSubscriptionService(deps: {
       await deleteSubscription(existing.id);
     },
 
-    listByEmail(email) {
+    listByEmail(emailInput) {
+      const email = parseOrThrow(Email, emailInput);
       return findConfirmedByEmail(email);
     },
   };

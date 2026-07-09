@@ -1,6 +1,5 @@
 import * as grpc from '@grpc/grpc-js';
 import { AppError } from '../../../../shared/appError.js';
-import { EMAIL_REGEX } from '../../../../validators/index.js';
 import type { SubscriptionService } from '../../subscription.service.js';
 
 function toGrpcStatus(httpStatus: number): grpc.status {
@@ -40,12 +39,6 @@ export function buildGrpcServiceImpl(service: SubscriptionService): grpc.Untyped
     callback: grpc.sendUnaryData<MessageResponse>,
   ): Promise<void> {
     const { email, repo } = call.request;
-    if (!email || !EMAIL_REGEX.test(email)) {
-      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid or missing email' });
-    }
-    if (!repo) {
-      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'repo is required' });
-    }
     try {
       await service.subscribe(email, repo);
       callback(null, { message: 'Confirmation email sent' });
@@ -91,9 +84,6 @@ export function buildGrpcServiceImpl(service: SubscriptionService): grpc.Untyped
     callback: grpc.sendUnaryData<GetSubsResponse>,
   ): Promise<void> {
     const { email } = call.request;
-    if (!email || !EMAIL_REGEX.test(email)) {
-      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid or missing email' });
-    }
     try {
       const rows = await service.listByEmail(email.trim());
       const subscriptions: SubscriptionItem[] = rows.map((s) => ({
