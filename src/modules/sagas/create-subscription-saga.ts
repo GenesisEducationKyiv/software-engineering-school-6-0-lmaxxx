@@ -33,7 +33,7 @@ export function createCreateSubscriptionSaga(
         async compensate(ctx: SagaContext) {
           // Only roll back a subscription this saga actually created; a
           // pre-existing pending row must survive a failed confirmation.
-          if (ctx.state.created === true && typeof ctx.state.subscriptionId === 'number') {
+          if (ctx.state.created === true && typeof ctx.state.subscriptionId === 'string') {
             await service.cancel(ctx.state.subscriptionId);
           }
         },
@@ -58,7 +58,7 @@ export function createCreateSubscriptionSaga(
           return Promise.resolve({});
         },
         async compensate(ctx: SagaContext) {
-          if (ctx.state.created === true && typeof ctx.state.subscriptionId === 'number') {
+          if (ctx.state.created === true && typeof ctx.state.subscriptionId === 'string') {
             await service.cancel(ctx.state.subscriptionId);
           }
         },

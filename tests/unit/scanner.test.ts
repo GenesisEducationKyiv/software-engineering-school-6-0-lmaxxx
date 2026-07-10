@@ -7,7 +7,7 @@ import { RoutingKeys } from '../../src/shared/events.js';
 import {
   trackedRepositoryFromRow,
   type RepositoryRow,
-} from '../../src/modules/repository/domain/tracked-repository.js';
+} from '../../src/modules/repository/tracked-repository.mapper.js';
 import { ReleaseTag } from '../../src/modules/repository/domain/release-tag.js';
 import { parseOrThrow } from '../../src/shared/domain/parse.js';
 import { AppError } from '../../src/shared/appError.js';

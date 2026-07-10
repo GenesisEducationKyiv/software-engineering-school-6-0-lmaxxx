@@ -23,7 +23,7 @@ import {
   findConfirmedByEmail,
 } from './subscription.repository.js';
 import { logger } from '../../logger.js';
-import type { SubscriptionResponse } from '../../types.js';
+import type { SubscriptionResponse } from './interfaces/http/dtos.js';
 
 
 export { AppError };
@@ -38,12 +38,12 @@ export type SubscriptionService = {
   unsubscribe(token: string): Promise<void>;
   listByEmail(email: string): Promise<SubscriptionResponse[]>;
   reserve(email: string, repo: string): Promise<{
-    subscriptionId: number;
+    subscriptionId: string;
     confirmToken: Token;
     unsubscribeToken: Token;
     created: boolean;
   }>;
-  cancel(subscriptionId: number): Promise<void>;
+  cancel(subscriptionId: string): Promise<void>;
 };
 
 export function createSubscriptionService(deps: {
@@ -76,7 +76,6 @@ export function createSubscriptionService(deps: {
       const existing = await findByEmailAndRepo(email, repo);
       const sub = existing ? reissueConfirmation(existing) : createSubscription(email, repo);
       await save(sub);
-      await registrar.ensureTracked(repo);
       await publishCreated(sub);
       logger.info(
         { email, repo },
@@ -91,8 +90,8 @@ export function createSubscriptionService(deps: {
 
       const existing = await findByEmailAndRepo(email, repo);
       const sub = existing ? reissueConfirmation(existing) : createSubscription(email, repo);
-      const newId = await save(sub);
-      const subscriptionId = existing ? existing.id! : newId!;
+      await save(sub);
+      const subscriptionId = sub.id;
       await registrar.ensureTracked(repo);
 
       return {
@@ -113,6 +112,7 @@ export function createSubscriptionService(deps: {
         throw new AppError(404, 'Confirmation token not found');
       }
       await save(confirmSubscription(existing));
+      await registrar.ensureTracked(existing.repo);
       logger.info({ token }, 'Subscription confirmed');
     },
 
@@ -122,11 +122,12 @@ export function createSubscriptionService(deps: {
       if (!existing) {
         throw new AppError(404, 'Token not found');
       }
-      await deleteSubscription(existing.id!);
+      await deleteSubscription(existing.id);
       logger.info({ token }, 'User unsubscribed');
     },
 
-    listByEmail(email) {
+    listByEmail(emailInput) {
+      const email = parseOrThrow(Email, emailInput);
       return findConfirmedByEmail(email);
     },
   };

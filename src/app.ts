@@ -3,7 +3,7 @@ import path from 'path';
 import { pinoHttp } from 'pino-http';
 import { errorHandler } from './middleware/errorHandler.js';
 import { metricsMiddleware } from './middleware/metricsMiddleware.js';
-import { createSubscriptionRouter } from './modules/subscription/routes/index.js';
+import { createSubscriptionRouter } from './modules/subscription/interfaces/http/index.js';
 import type { SubscriptionService } from './modules/subscription/subscription.service.js';
 import type { SagaOrchestrator } from './infra/saga/types.js';
 import { register } from './metrics.js';

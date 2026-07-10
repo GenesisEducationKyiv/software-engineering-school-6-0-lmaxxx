@@ -1,33 +1,8 @@
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
-import type { SubscriptionService } from '../modules/subscription/index.js';
-import { AppError } from '../shared/appError.js';
-import { EMAIL_REGEX } from '../validators/index.js';
-import { logger } from '../logger.js';
-import { grpcRequestsTotal, grpcRequestDurationSeconds } from '../metrics.js';
-
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const PROTO_PATH = join(__dirname, '..', '..', 'proto', 'github_notifier.proto');
-
-const packageDef = protoLoader.loadSync(PROTO_PATH, {
-  keepCase: true,
-  longs: String,
-  enums: String,
-  defaults: true,
-  oneofs: true,
-});
-
-const proto = grpc.loadPackageDefinition(packageDef) as unknown as {
-  github_notifier: {
-    GitHubNotifier: grpc.ServiceClientConstructor;
-  };
-};
-
+import { AppError } from '../../../../shared/appError.js';
+import { logger } from '../../../../logger.js';
+import { grpcRequestsTotal, grpcRequestDurationSeconds } from '../../../../metrics.js';
+import type { SubscriptionService } from '../../subscription.service.js';
 
 function toGrpcStatus(httpStatus: number): grpc.status {
   switch (httpStatus) {
@@ -104,20 +79,13 @@ interface SubscriptionItem   {
 }
 interface GetSubsResponse    { subscriptions: SubscriptionItem[] }
 
-
-/** Builds the gRPC server around an injected subscription service. */
-export function createGrpcServer(service: SubscriptionService): grpc.Server {
+/** Builds the gRPC service implementation around an injected subscription service. */
+export function buildGrpcServiceImpl(service: SubscriptionService): grpc.UntypedServiceImplementation {
   async function subscribe(
     call: grpc.ServerUnaryCall<SubscribeRequest, MessageResponse>,
     callback: grpc.sendUnaryData<MessageResponse>,
   ): Promise<void> {
     const { email, repo } = call.request;
-    if (!email || !EMAIL_REGEX.test(email)) {
-      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid or missing email' });
-    }
-    if (!repo) {
-      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'repo is required' });
-    }
     try {
       await service.subscribe(email, repo);
       callback(null, { message: 'Confirmation email sent' });
@@ -163,9 +131,6 @@ export function createGrpcServer(service: SubscriptionService): grpc.Server {
     callback: grpc.sendUnaryData<GetSubsResponse>,
   ): Promise<void> {
     const { email } = call.request;
-    if (!email || !EMAIL_REGEX.test(email)) {
-      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'Invalid or missing email' });
-    }
     try {
       const rows = await service.listByEmail(email.trim());
       const subscriptions: SubscriptionItem[] = rows.map((s) => ({
@@ -180,34 +145,10 @@ export function createGrpcServer(service: SubscriptionService): grpc.Server {
     }
   }
 
-  const server = new grpc.Server();
-  server.addService(proto.github_notifier.GitHubNotifier.service, {
+  return {
     subscribe:            withGrpcMetrics('Subscribe', subscribe),
     confirmSubscription:  withGrpcMetrics('ConfirmSubscription', confirmSubscriptionHandler),
     unsubscribe:          withGrpcMetrics('Unsubscribe', unsubscribeHandler),
     getSubscriptions:     withGrpcMetrics('GetSubscriptions', getSubscriptionsHandler),
-  });
-  return server;
-}
-
-export function startGrpcServer(
-  port: number,
-  service: SubscriptionService,
-): Promise<grpc.Server | null> {
-  return new Promise((resolve) => {
-    const server = createGrpcServer(service);
-    server.bindAsync(
-      `0.0.0.0:${port}`,
-      grpc.ServerCredentials.createInsecure(),
-      (err, boundPort) => {
-        if (err) {
-          logger.warn({ port, err: err.message }, 'gRPC server failed to start');
-          resolve(null);
-          return;
-        }
-        logger.info({ port: boundPort }, 'gRPC server listening');
-        resolve(server);
-      },
-    );
-  });
+  };
 }

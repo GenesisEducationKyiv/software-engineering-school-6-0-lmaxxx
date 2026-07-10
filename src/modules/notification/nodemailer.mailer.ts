@@ -1,5 +1,62 @@
-import { sendConfirmationEmail, sendReleaseNotification } from '../../infra/mailer.js';
+import nodemailer from 'nodemailer';
+import { config } from '../../config.js';
+import { emailsSentTotal } from '../../metrics.js';
+import { logger } from '../../logger.js';
 import type { Mailer } from './ports/mailer.js';
+
+const transporter = nodemailer.createTransport({
+  host: config.smtp.host,
+  port: config.smtp.port,
+  auth: config.smtp.user
+    ? { user: config.smtp.user, pass: config.smtp.pass }
+    : undefined,
+});
+
+async function sendConfirmationEmail(
+  email: string,
+  repo: string,
+  confirmToken: string,
+  sagaId?: string,
+): Promise<void> {
+  const confirmUrl = sagaId
+    ? `${config.baseUrl}/api/confirm/${confirmToken}?sagaId=${sagaId}`
+    : `${config.baseUrl}/api/confirm/${confirmToken}`;
+  await transporter.sendMail({
+    from: config.smtp.from,
+    to: email,
+    subject: `Confirm your subscription to ${repo} releases`,
+    text: [
+      `Please confirm your subscription to receive release notifications for ${repo}:`,
+      '',
+      confirmUrl,
+    ].join('\n'),
+  });
+  emailsSentTotal.inc({ type: 'confirmation' });
+  logger.info({ email, repo }, 'Confirmation email sent');
+}
+
+async function sendReleaseNotification(
+  email: string,
+  repo: string,
+  tag: string,
+  unsubscribeToken: string,
+): Promise<void> {
+  const releaseUrl = `https://github.com/${repo}/releases/tag/${tag}`;
+  const unsubscribeUrl = `${config.baseUrl}/api/unsubscribe/${unsubscribeToken}`;
+  await transporter.sendMail({
+    from: config.smtp.from,
+    to: email,
+    subject: `New release of ${repo}: ${tag}`,
+    text: [
+      `A new release has been published for ${repo}!`,
+      `Version: ${tag}`,
+      `View release: ${releaseUrl}`,
+      '',
+      `To unsubscribe: ${unsubscribeUrl}`,
+    ].join('\n'),
+  });
+  emailsSentTotal.inc({ type: 'release' });
+}
 
 export function createNodemailerMailer(): Mailer {
   return {

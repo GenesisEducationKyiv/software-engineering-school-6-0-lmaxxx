@@ -1,10 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { AppError } from '../../../shared/appError.js';
-import type { Email } from '../../../shared/domain/email.js';
-import type { RepoSlug } from '../../../shared/domain/repo-slug.js';
-import { type Token, generateToken } from './token.js';
+import { parseOrThrow } from '../../../shared/domain/parse.js';
+import { Email } from '../../../shared/domain/email.js';
+import { RepoSlug } from '../../../shared/domain/repo-slug.js';
+import { Token, generateToken } from './token.js';
 
 export type Subscription = {
-  readonly id: number | null;
+  readonly id: string;
   readonly email: Email;
   readonly repo: RepoSlug;
   readonly confirmed: boolean;
@@ -14,7 +16,7 @@ export type Subscription = {
 };
 
 export interface SubscriptionRow {
-  id: number;
+  id: string;
   email: string;
   repo: string;
   confirmed: boolean;
@@ -25,7 +27,7 @@ export interface SubscriptionRow {
 
 export function createSubscription(email: Email, repo: RepoSlug): Subscription {
   return {
-    id: null,
+    id: randomUUID(),
     email,
     repo,
     confirmed: false,
@@ -52,11 +54,12 @@ export function confirm(sub: Subscription): Subscription {
 export function subscriptionFromRow(row: SubscriptionRow): Subscription {
   return {
     id: row.id,
-    email: row.email as Email,
-    repo: row.repo as RepoSlug,
+    email: parseOrThrow(Email, row.email, 500),
+    repo: parseOrThrow(RepoSlug, row.repo, 500),
     confirmed: row.confirmed,
-    confirmToken: row.confirm_token as Token | null,
-    unsubscribeToken: row.unsubscribe_token as Token,
+    confirmToken:
+      row.confirm_token === null ? null : parseOrThrow(Token, row.confirm_token, 500),
+    unsubscribeToken: parseOrThrow(Token, row.unsubscribe_token, 500),
     createdAt: row.created_at,
   };
 }
