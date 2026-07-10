@@ -1,4 +1,4 @@
-import type { SagaDefinition, SagaContext } from '../../infra/saga/types.js';
+import { SagaStepType, type SagaDefinition, type SagaContext } from '../../infra/saga/types.js';
 import type { SubscriptionService } from '../subscription/subscription.service.js';
 
 export const CREATE_SUBSCRIPTION_SAGA_TYPE = 'CREATE_SUBSCRIPTION';
@@ -17,7 +17,7 @@ export function createCreateSubscriptionSaga(
     steps: [
       {
         name: 'reserve',
-        type: 'LOCAL',
+        type: SagaStepType.Local,
         async action(ctx: SagaContext) {
           const r = await service.reserve(
             ctx.state.email as string,
@@ -40,7 +40,7 @@ export function createCreateSubscriptionSaga(
       },
       {
         name: 'sendEmail',
-        type: 'ACTION',
+        type: SagaStepType.Action,
         commandRoutingKey: 'saga.email.send_confirmation',
         action(_ctx: SagaContext) {
           return Promise.resolve({});
@@ -52,7 +52,7 @@ export function createCreateSubscriptionSaga(
       },
       {
         name: 'waitConfirmation',
-        type: 'WAIT',
+        type: SagaStepType.Wait,
         timeoutMs: 24 * 60 * 60 * 1000,
         action(_ctx: SagaContext) {
           return Promise.resolve({});

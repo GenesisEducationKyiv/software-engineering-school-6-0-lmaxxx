@@ -16,7 +16,7 @@ export type EventHandler = (event: IncomingEvent) => Promise<void>;
  * amqplib directly and can be mocked in tests.
  */
 export interface EventBus {
-  publish<K extends RoutingKey>(routingKey: K, payload: EventPayloads[K]): Promise<void>;
+  publish(routingKey: string, payload: unknown): Promise<void>;
   subscribe(queue: string, routingKeys: RoutingKey[], handler: EventHandler): Promise<void>;
   close(): Promise<void>;
 }

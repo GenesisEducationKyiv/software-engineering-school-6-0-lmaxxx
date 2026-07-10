@@ -14,8 +14,11 @@ export async function sendConfirmationEmail(
   email: string,
   repo: string,
   confirmToken: string,
+  sagaId?: string,
 ): Promise<void> {
-  const confirmUrl = `${config.baseUrl}/api/confirm/${confirmToken}`;
+  const confirmUrl = sagaId
+    ? `${config.baseUrl}/api/confirm/${confirmToken}?sagaId=${sagaId}`
+    : `${config.baseUrl}/api/confirm/${confirmToken}`;
   await transporter.sendMail({
     from: config.smtp.from,
     to: email,
