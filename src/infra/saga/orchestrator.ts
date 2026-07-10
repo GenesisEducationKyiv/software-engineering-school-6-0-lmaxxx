@@ -130,6 +130,7 @@ export function createSagaOrchestrator(): SagaOrchestrator {
       const message = errMessage(err);
       await updateSagaStepStatus(stepDbId, StepStatus.Failed, message);
       await compensate(saga, def, message);
+      throw err;
     }
   }
 

@@ -2,6 +2,7 @@ import { type SagaOrchestrator, type SagaDefinition, type SagaRecord, SagaStepTy
 import { findPendingSagas } from './saga.repository.js';
 import { findStepBySagaAndName } from './saga.repository.js';
 import { pollOutbox } from './outbox.repository.js';
+import { logger } from '../../logger.js';
 
 async function checkTimeout(
   saga: SagaRecord,
@@ -13,7 +14,7 @@ async function checkTimeout(
 
   const elapsed = Date.now() - new Date(saga.updatedAt).getTime();
   if (elapsed > step.timeoutMs) {
-    console.log(`Saga ${saga.id}: step "${step.name}" timed out (${elapsed}ms > ${step.timeoutMs}ms), failing`);
+    logger.info({ sagaId: saga.id, step: step.name }, `Saga ${saga.id}: step "${step.name}" timed out (${elapsed}ms > ${step.timeoutMs}ms), failing`);
     await orchestrator.failStep(saga.id, step.name, 'Timed out during recovery');
     return true;
   }
@@ -27,16 +28,16 @@ export async function recoverPendingSagas(
   const pending = await findPendingSagas();
 
   if (pending.length === 0) {
-    console.log('No pending sagas to recover');
+    logger.info('No pending sagas to recover');
     return;
   }
 
-  console.log(`Recovering ${pending.length} pending saga(s)...`);
+  logger.info({ count: pending.length }, `Recovering ${pending.length} pending saga(s)...`);
 
   for (const saga of pending) {
     const def = getDefinition(saga.sagaType);
     if (!def) {
-      console.warn(`Unknown saga type "${saga.sagaType}" for saga ${saga.id}, marked FAILED`);
+      logger.warn({ sagaId: saga.id, sagaType: saga.sagaType }, `Unknown saga type "${saga.sagaType}" for saga ${saga.id}, marked FAILED`);
       continue;
     }
 
@@ -44,9 +45,9 @@ export async function recoverPendingSagas(
     const step = def.steps[stepIndex];
     if (!step) {
       if (stepIndex >= def.steps.length) {
-        console.log(`Saga ${saga.id}: already past all steps, completing`);
+        logger.info({ sagaId: saga.id }, `Saga ${saga.id}: already past all steps, completing`);
       } else {
-        console.warn(`Saga ${saga.id}: step index ${stepIndex} out of range, completing`);
+        logger.warn({ sagaId: saga.id, stepIndex }, `Saga ${saga.id}: step index ${stepIndex} out of range, completing`);
       }
       continue;
     }
@@ -56,20 +57,24 @@ export async function recoverPendingSagas(
     if (step.type === SagaStepType.Action) {
       const stepRecord = await findStepBySagaAndName(saga.id, step.name);
       if (stepRecord && stepRecord.status === StepStatus.Completed) {
-        console.log(`Saga ${saga.id}: step "${step.name}" already completed, advancing`);
-        await orchestrator.completeStep(saga.id, step.name);
+        logger.info({ sagaId: saga.id, step: step.name }, `Saga ${saga.id}: step "${step.name}" already completed, advancing`);
+        try {
+          await orchestrator.completeStep(saga.id, step.name);
+        } catch (err) {
+          logger.error({ sagaId: saga.id, err }, `Saga ${saga.id}: failed to advance during recovery`);
+        }
       } else {
         const pendingOutbox = await pollOutbox(1).then(
           (rows) => rows.filter((r) => r.sagaId === saga.id),
         );
         if (pendingOutbox.length > 0) {
-          console.log(`Saga ${saga.id}: outbox entry pending for step "${step.name}", waiting`);
+          logger.info({ sagaId: saga.id, step: step.name }, `Saga ${saga.id}: outbox entry pending for step "${step.name}", waiting`);
         } else {
-          console.log(`Saga ${saga.id}: step "${step.name}" awaiting reply, resuming`);
+          logger.info({ sagaId: saga.id, step: step.name }, `Saga ${saga.id}: step "${step.name}" awaiting reply, resuming`);
         }
       }
     } else if (step.type === SagaStepType.Wait) {
-      console.log(`Saga ${saga.id}: waiting for external signal on step "${step.name}"`);
+      logger.info({ sagaId: saga.id, step: step.name }, `Saga ${saga.id}: waiting for external signal on step "${step.name}"`);
     }
   }
 }
@@ -93,9 +98,9 @@ export function startSagaTimeoutSweep(
 ): { stop: () => void } {
   const interval = setInterval(() => {
     sweepTimedOutSagas(orchestrator, getDefinition).catch((err) =>
-      console.error('Saga timeout sweep failed:', err),
+      logger.error({ err }, 'Saga timeout sweep failed'),
     );
   }, intervalMs);
-  console.log(`Saga timeout sweep started (interval: ${intervalMs}ms)`);
+  logger.info({ intervalMs }, `Saga timeout sweep started (interval: ${intervalMs}ms)`);
   return { stop: () => clearInterval(interval) };
 }

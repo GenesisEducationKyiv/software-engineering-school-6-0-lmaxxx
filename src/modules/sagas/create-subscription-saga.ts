@@ -1,5 +1,6 @@
 import { SagaStepType, type SagaDefinition, type SagaContext } from '../../infra/saga/types.js';
-import type { SubscriptionService } from '../subscription/subscription.service.js';
+import type { SubscriptionService } from '../subscription/index.js';
+import { logger } from '../../logger.js';
 
 export const CREATE_SUBSCRIPTION_SAGA_TYPE = 'CREATE_SUBSCRIPTION';
 
@@ -46,7 +47,7 @@ export function createCreateSubscriptionSaga(
           return Promise.resolve({});
         },
         compensate(_ctx: SagaContext) {
-          console.warn(`Saga ${_ctx.sagaId}: email already sent, no compensation`);
+          logger.warn({ sagaId: _ctx.sagaId }, `Saga ${_ctx.sagaId}: email already sent, no compensation`);
           return Promise.resolve();
         },
       },
