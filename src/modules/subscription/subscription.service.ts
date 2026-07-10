@@ -1,20 +1,29 @@
-import { v4 as uuidv4 } from 'uuid';
 import { AppError } from '../../shared/appError.js';
-import { checkRepoExists } from '../github/index.js';
-import { sendConfirmationEmail } from '../../infra/mailer.js';
+import { Email } from '../../shared/domain/email.js';
+import { RepoSlug } from '../../shared/domain/repo-slug.js';
+import { Token } from './domain/token.js';
+import { parseOrThrow } from '../../shared/domain/parse.js';
+import {
+  type Subscription,
+  createSubscription,
+  reissueConfirmation,
+  confirm as confirmSubscription,
+} from './domain/subscription.js';
+import { RoutingKeys } from '../../shared/events.js';
+import { REPO_REGEX } from '../../validators/index.js';
+import type { RepositoryChecker } from './ports/repository-checker.js';
+import type { RepositoryRegistrar } from './ports/repository-registrar.js';
+import type { EventBus } from '../../infra/messaging/index.js';
 import {
   findByEmailAndRepo,
   findByConfirmToken,
   findByUnsubscribeToken,
-  insertSubscription,
-  markConfirmed,
-  updateConfirmToken,
+  save,
   deleteSubscription,
   findConfirmedByEmail,
 } from './subscription.repository.js';
-import { REPO_REGEX, UUID_REGEX } from '../../validators/index.js';
 import { logger } from '../../logger.js';
-import type { SubscriptionResponse } from '../../types.js';
+import type { SubscriptionResponse } from './interfaces/http/dtos.js';
 
 
 export { AppError };
@@ -23,58 +32,103 @@ export function validateRepoFormat(repo: string): boolean {
   return REPO_REGEX.test(repo);
 }
 
-export async function createSubscription(email: string, repo: string): Promise<void> {
-  if (!validateRepoFormat(repo)) {
-    throw new AppError(400, 'Invalid repo format — expected owner/repo');
+export type SubscriptionService = {
+  subscribe(email: string, repo: string): Promise<void>;
+  confirm(token: string): Promise<void>;
+  unsubscribe(token: string): Promise<void>;
+  listByEmail(email: string): Promise<SubscriptionResponse[]>;
+  reserve(email: string, repo: string): Promise<{
+    subscriptionId: string;
+    confirmToken: Token;
+    unsubscribeToken: Token;
+    created: boolean;
+  }>;
+  cancel(subscriptionId: string): Promise<void>;
+};
+
+export function createSubscriptionService(deps: {
+  repoChecker: RepositoryChecker;
+  registrar: RepositoryRegistrar;
+  bus: EventBus;
+}): SubscriptionService {
+  const { repoChecker, registrar, bus } = deps;
+
+  function publishCreated(sub: Subscription): Promise<void> {
+    return bus.publish(RoutingKeys.SubscriptionCreated, {
+      email: sub.email,
+      repo: sub.repo,
+      confirmToken: sub.confirmToken!,
+    });
   }
 
-  await checkRepoExists(repo);
-
-  const existing = await findByEmailAndRepo(email, repo);
-
-  if (existing) {
-    if (existing.confirmed) {
-      throw new AppError(409, 'Already subscribed to this repository');
-    }
-    const newToken = uuidv4();
-    await updateConfirmToken(existing.id, newToken);
-    await sendConfirmationEmail(email, repo, newToken);
-    logger.info({ email, repo }, 'Resent confirmation email for existing unconfirmed subscription');
-    return;
+  function doReserve(emailInput: string, repoInput: string) {
+    const email = parseOrThrow(Email, emailInput);
+    const repo = parseOrThrow(RepoSlug, repoInput);
+    return { email, repo };
   }
 
-  const confirmToken = uuidv4();
-  const unsubscribeToken = uuidv4();
+  return {
+    async subscribe(emailInput, repoInput) {
+      const { email, repo } = doReserve(emailInput, repoInput);
 
-  await insertSubscription(email, repo, confirmToken, unsubscribeToken);
-  await sendConfirmationEmail(email, repo, confirmToken);
-  logger.info({ email, repo }, 'New subscription created');
-}
+      await repoChecker.ensureExists(repo);
 
-export async function confirmSubscription(token: string): Promise<void> {
-  const sub = await findByConfirmToken(token);
-  if (!sub) {
-    throw new AppError(404, 'Confirmation token not found');
-  }
-  if (sub.confirmed) {
-    throw new AppError(400, 'Subscription already confirmed');
-  }
-  await markConfirmed(sub.id);
-  logger.info({ token }, 'Subscription confirmed');
-}
+      const existing = await findByEmailAndRepo(email, repo);
+      const sub = existing ? reissueConfirmation(existing) : createSubscription(email, repo);
+      await save(sub);
+      await publishCreated(sub);
+      logger.info(
+        { email, repo },
+        existing ? 'Resent confirmation email for existing unconfirmed subscription' : 'New subscription created',
+      );
+    },
 
-export async function unsubscribeUser(token: string): Promise<void> {
-  if (!UUID_REGEX.test(token)) {
-    throw new AppError(400, 'Invalid token');
-  }
-  const sub = await findByUnsubscribeToken(token);
-  if (!sub) {
-    throw new AppError(404, 'Token not found');
-  }
-  await deleteSubscription(sub.id);
-  logger.info({ token }, 'User unsubscribed');
-}
+    async reserve(emailInput, repoInput) {
+      const { email, repo } = doReserve(emailInput, repoInput);
 
-export async function getSubscriptionsByEmail(email: string): Promise<SubscriptionResponse[]> {
-  return findConfirmedByEmail(email);
+      await repoChecker.ensureExists(repo);
+
+      const existing = await findByEmailAndRepo(email, repo);
+      const sub = existing ? reissueConfirmation(existing) : createSubscription(email, repo);
+      await save(sub);
+      const subscriptionId = sub.id;
+      await registrar.ensureTracked(repo);
+
+      return {
+        subscriptionId,
+        confirmToken: sub.confirmToken!,
+        unsubscribeToken: sub.unsubscribeToken,
+        created: !existing,
+      };
+    },
+
+    async cancel(subscriptionId) {
+      await deleteSubscription(subscriptionId);
+    },
+
+    async confirm(token) {
+      const existing = await findByConfirmToken(token);
+      if (!existing) {
+        throw new AppError(404, 'Confirmation token not found');
+      }
+      await save(confirmSubscription(existing));
+      await registrar.ensureTracked(existing.repo);
+      logger.info({ token }, 'Subscription confirmed');
+    },
+
+    async unsubscribe(token) {
+      parseOrThrow(Token, token);
+      const existing = await findByUnsubscribeToken(token);
+      if (!existing) {
+        throw new AppError(404, 'Token not found');
+      }
+      await deleteSubscription(existing.id);
+      logger.info({ token }, 'User unsubscribed');
+    },
+
+    listByEmail(emailInput) {
+      const email = parseOrThrow(Email, emailInput);
+      return findConfirmedByEmail(email);
+    },
+  };
 }

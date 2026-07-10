@@ -2,11 +2,31 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { runner as migrate } from 'node-pg-migrate';
 import { config } from './config.js';
-import { app } from './app.js';
-import { startScanner } from './modules/repository/index.js';
+import { createApp } from './app.js';
 import { pool } from './infra/db/pool.js';
 import { redisClient } from './infra/cache/redis.js';
-import { startGrpcServer } from './interfaces/grpc.js';
+import { connectBus } from './infra/messaging/index.js';
+import { startGrpcServer } from './infra/grpc/index.js';
+import { createSubscriptionService } from './modules/subscription/index.js';
+import { buildGrpcServiceImpl } from './modules/subscription/interfaces/grpc/handlers.js';
+import {
+  createGitHubRepositoryChecker,
+  createGitHubReleaseFetcher,
+  createReleaseScanService,
+  createRepositoryRegistrar,
+  startScanner,
+} from './modules/repository/index.js';
+import {
+  startNotificationConsumer,
+  createNotificationHandlers,
+  createNodemailerMailer,
+  createSubscriberDirectory,
+} from './modules/notification/index.js';
+import { createSagaOrchestrator, recoverPendingSagas, startSagaTimeoutSweep } from './infra/saga/index.js';
+import { getDefinition, registerDefinition } from './modules/sagas/registry.js';
+import { createCreateSubscriptionSaga } from './modules/sagas/index.js';
+import { createSagaReplier } from './modules/sagas/saga-replier.js';
+import { startOutboxPublisher } from './infra/messaging/outbox-publisher.js';
 import { logger } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,17 +41,47 @@ async function main() {
     log: (msg: string) => logger.debug({ component: 'migration' }, msg),
   });
 
-  const server = app.listen(config.port, () => {
+  const bus = await connectBus();
+
+  const repoChecker = createGitHubRepositoryChecker();
+  const releaseFetcher = createGitHubReleaseFetcher();
+
+  const repoRegistrar = createRepositoryRegistrar();
+
+  const subscriptionService = createSubscriptionService({ repoChecker, registrar: repoRegistrar, bus });
+  const releaseScanService = createReleaseScanService({ releases: releaseFetcher, bus });
+
+  registerDefinition(createCreateSubscriptionSaga(subscriptionService));
+
+  const sagaOrchestrator = createSagaOrchestrator();
+  await recoverPendingSagas(sagaOrchestrator, getDefinition);
+
+  const sagaReplier = createSagaReplier(sagaOrchestrator);
+
+  const handlers = createNotificationHandlers({
+    subscribers: createSubscriberDirectory(),
+    mailer: createNodemailerMailer(),
+    bus,
+    sagaReplier,
+  });
+  await startNotificationConsumer(bus, handlers);
+
+  const outbox = startOutboxPublisher(bus);
+
+  const server = createApp(subscriptionService, sagaOrchestrator).listen(config.port, () => {
     logger.info({ port: config.port }, 'Server listening');
   });
 
-  const scannerInterval = startScanner();
+  const scannerInterval = startScanner(releaseScanService);
+  const sagaTimeoutSweep = startSagaTimeoutSweep(sagaOrchestrator, getDefinition, config.sagaTimeoutSweepIntervalMs);
 
-  const grpcServer = await startGrpcServer(config.grpcPort);
+  const grpcServer = await startGrpcServer(config.grpcPort, buildGrpcServiceImpl(subscriptionService));
 
   function shutdown(signal: string) {
     logger.info({ signal }, 'Received signal, shutting down gracefully');
     clearInterval(scannerInterval);
+    outbox.stop();
+    sagaTimeoutSweep.stop();
     grpcServer?.forceShutdown();
 
     const forceExit = setTimeout(() => {
@@ -41,6 +91,7 @@ async function main() {
     forceExit.unref();
 
     server.close(async () => {
+      await bus.close();
       await pool.end();
       await redisClient?.quit();
       logger.info('Shutdown complete');

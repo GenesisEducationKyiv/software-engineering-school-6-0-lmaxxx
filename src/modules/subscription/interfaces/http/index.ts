@@ -1,0 +1,73 @@
+import { Router, Request, Response, NextFunction } from 'express';
+import { AppError } from '../../../../shared/appError.js';
+import type { SubscriptionService } from '../../subscription.service.js';
+import type { SagaOrchestrator } from '../../../../infra/saga/types.js';
+import { getDefinition, CREATE_SUBSCRIPTION_SAGA_TYPE } from '../../../sagas/index.js';
+
+/** Builds the subscription HTTP router around an injected application service. */
+export function createSubscriptionRouter(
+  service: SubscriptionService,
+  orchestrator?: SagaOrchestrator,
+): Router {
+  const router = Router();
+
+  router.post('/subscribe', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, repo } = req.body as { email?: unknown; repo?: unknown };
+      if (typeof email !== 'string' || !email) {
+        return res.status(400).json({ error: 'email is required' });
+      }
+      if (typeof repo !== 'string' || !repo) {
+        return res.status(400).json({ error: 'repo is required' });
+      }
+      const def = getDefinition(CREATE_SUBSCRIPTION_SAGA_TYPE);
+      if (orchestrator && def) {
+        const sagaId = await orchestrator.start(def, { email, repo });
+        res.status(200).json({ message: 'Confirmation email sent', sagaId });
+      } else {
+        await service.subscribe(email, repo);
+        res.status(200).json({ message: 'Confirmation email sent' });
+      }
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/confirm/:token', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      await service.confirm(req.params.token);
+      if (orchestrator && typeof req.query.sagaId === 'string') {
+        await orchestrator.completeStep(req.query.sagaId, 'waitConfirmation', {
+          confirmed: true,
+        });
+      }
+      res.status(200).json({ message: 'Subscription confirmed' });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/unsubscribe/:token', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      await service.unsubscribe(req.params.token);
+      res.json({ message: 'Unsubscribed successfully' });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/subscriptions', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email } = req.query;
+      if (!email || typeof email !== 'string' || email.trim() === '') {
+        throw new AppError(400, 'Missing or invalid email');
+      }
+      const subscriptions = await service.listByEmail(email.trim());
+      res.json(subscriptions);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  return router;
+}

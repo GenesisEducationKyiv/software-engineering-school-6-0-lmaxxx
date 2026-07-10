@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The GitHub Release Notifier is a Node.js service that lets users subscribe their email address to a GitHub repository. When a new release is published, all confirmed subscribers receive an email notification containing the release tag, title, and a direct link to the release page. Three subsystems — a REST API, a background scanner, and a gRPC server — run inside a **single Node.js process** and share a common service layer.
+The GitHub Release Notifier is a Node.js service that lets users subscribe their email address to a GitHub repository. When a new release is published, all confirmed subscribers receive an email notification containing the release tag, title, and a direct link to the release page. The system is a **modular monolith** running inside a **single Node.js process**: a REST API, a background scanner, a gRPC server, and a notification module. Modules communicate asynchronously by publishing **domain events** to a **RabbitMQ** topic exchange; the notification module consumes those events and sends email.
 
 ---
 
@@ -12,24 +12,24 @@ The GitHub Release Notifier is a Node.js service that lets users subscribe their
 ┌──────────────────────────────── Node.js process ────────────────────────────────┐
 │                                                                                   │
 │  ┌──────────────────┐  ┌────────────────────────────┐  ┌───────────────────┐   │
-│  │  Express REST API │  │  Scanner (setInterval)      │  │  gRPC Server      │   │
-│  │  :PORT (3000)     │  │  every SCAN_INTERVAL_MS     │  │  :GRPC_PORT(50051)│   │
+│  │ subscription mod │  │  repository mod (scanner)   │  │  gRPC Server      │   │
+│  │ + Express API     │  │  every SCAN_INTERVAL_MS     │  │  :GRPC_PORT(50051)│   │
 │  └────────┬──────────┘  └──────────────┬─────────────┘  └────────┬──────────┘   │
-│           │                            │                           │              │
-│           └────────────────────────────┼───────────────────────────┘             │
-│                                        ▼                                         │
-│                          ┌─────────────────────────┐                            │
-│                          │      Service Layer        │                            │
-│                          │  subscription.ts          │                            │
-│                          │  github.ts                │                            │
-│                          │  email.ts                 │                            │
-│                          └──────────┬────────────────┘                           │
+│           │ publish                     │ publish                  │              │
+│           │ subscription.created        │ release.published        │              │
+│           └─────────────┬───────────────┴──────────────────────────┘             │
+│                         ▼                                                         │
+│              ┌────────────────────────┐        ┌──────────────────────────┐      │
+│              │  EventBus (RabbitMQ)     │ ─────► │  notification module      │      │
+│              │  exchange domain.events  │ queue  │  consumes events,         │      │
+│              │  (topic, durable)        │ notif. │  sends email (Nodemailer) │      │
+│              └────────────────────────┘        └──────────────────────────┘      │
 │                                     │                                             │
 │                  ┌──────────────────┼──────────────────┐                        │
 │                  ▼                  ▼                   ▼                        │
 │           ┌────────────┐   ┌──────────────┐   ┌──────────────┐                 │
 │           │  DB (pg)   │   │  Redis cache │   │  Nodemailer  │                 │
-│           │  src/db/   │   │  (optional)  │   │  SMTP        │                 │
+│           │  infra/db/ │   │  (optional)  │   │  SMTP        │                 │
 │           └─────┬──────┘   └──────┬───────┘   └──────────────┘                 │
 └─────────────────┼─────────────────┼───────────────────────────────────────────── ┘
                   ▼                 ▼
@@ -37,7 +37,7 @@ The GitHub Release Notifier is a Node.js service that lets users subscribe their
                              (via axios, cached)
 ```
 
-The service has **no message queue and no worker pool** — the scanner runs in-process on a `setInterval`. Redis is optional; the service degrades gracefully to uncached GitHub API calls when Redis is unavailable.
+Modules are decoupled through the **RabbitMQ** broker: publishers (subscription, scanner) emit domain events and never call the mailer directly; the notification module is the sole consumer. Delivery is at-least-once — the consumer acks after a successful send and nacks+requeues on failure. The scanner still runs in-process on a `setInterval`. Redis is optional; the service degrades gracefully to uncached GitHub API calls when Redis is unavailable.
 
 ---
 
@@ -66,8 +66,9 @@ SubscriptionService.createSubscription()
   │
   ├─► DB: UPSERT repositories row
   │
-  └─► EmailService.sendConfirmationEmail()
-        └─► Nodemailer SMTP → confirmation link to GET /api/confirm/:token
+  └─► publish `subscription.created` { email, repo, confirmToken }
+        └─► notification module consumes → Nodemailer SMTP →
+            confirmation link to GET /api/confirm/:token
 
 200 { message: "Confirmation email sent" }
 ```
@@ -121,10 +122,11 @@ DB: SELECT DISTINCT repo FROM subscriptions WHERE confirmed = true
         │
         ├─► DB: UPDATE repositories SET last_seen_tag, last_checked_at
         │
-        └─► DB: SELECT confirmed subscribers for repo
-                  └─► for each subscriber:
-                        └─► EmailService.sendReleaseEmail()
-                              └─► Nodemailer SMTP (includes unsubscribe link)
+        └─► publish `release.published` { repo, tag }
+              └─► notification module consumes:
+                    ├─► DB: SELECT confirmed subscribers for repo
+                    └─► for each subscriber:
+                          └─► Nodemailer SMTP (includes unsubscribe link)
   │
   ▼
 metrics: scans_total++
@@ -140,6 +142,7 @@ metrics: scans_total++
 | **SMTP (email)** | `nodemailer` | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Throws on transport error; propagates to caller |
 | **Redis** | `ioredis` | `REDIS_URL`, `REDIS_TTL_SECONDS` | — | Connection errors caught at startup; cache layer returns `null`, app continues uncached |
 | **PostgreSQL** | `pg` (pool) | `DATABASE_URL` | — | Pool errors propagate as unhandled rejections; pool drained on shutdown |
+| **RabbitMQ** | `amqplib` | `RABBITMQ_URL` | — | Topic exchange `domain.events`; consumer acks on success, nacks+requeues on handler failure (at-least-once); connection closed on shutdown |
 
 ---
 
@@ -184,6 +187,7 @@ All configuration is loaded from environment variables in `src/config.ts`. The o
 | `GITHUB_TOKEN` | `null` | no | GitHub personal access token (raises rate limit from 60 to 5000 req/hr) |
 | `REDIS_URL` | `null` | no | Redis connection URL; caching is disabled when absent |
 | `REDIS_TTL_SECONDS` | `600` | no | GitHub API cache TTL in seconds |
+| `RABBITMQ_URL` | `amqp://guest:guest@localhost:5672` | no | RabbitMQ broker connection URL |
 | `SMTP_HOST` | `smtp.gmail.com` | no | SMTP server hostname |
 | `SMTP_PORT` | `587` | no | SMTP server port |
 | `SMTP_USER` | `""` | no | SMTP username |
@@ -215,17 +219,19 @@ Unmatched routes are normalized to the label value `unknown` to prevent high-car
 ### Startup (`src/index.ts`)
 
 1. Run pending database migrations (node-pg-migrate, direction: up)
-2. Start HTTP server on `PORT`
-3. Start scanner `setInterval` with period `SCAN_INTERVAL_MS`
-4. Start gRPC server on `GRPC_PORT`
+2. Connect to RabbitMQ and start the notification module consumer
+3. Start HTTP server on `PORT`
+4. Start scanner `setInterval` with period `SCAN_INTERVAL_MS`
+5. Start gRPC server on `GRPC_PORT`
 
-Steps are sequential: the server only accepts traffic after migrations complete.
+Steps are sequential: the broker connects before any publisher runs, and the server only accepts traffic after migrations complete.
 
 ### Graceful Shutdown (SIGTERM / SIGINT)
 
 1. Clear scanner interval (stops future cycles; any in-progress cycle completes)
 2. Arm a 10-second forced-exit timeout
 3. Close HTTP server (stop accepting new connections; drain in-flight requests)
-4. Drain PostgreSQL connection pool (`pool.end()`)
-5. Quit Redis client if connected (`redisClient.quit()`)
-6. Process exits with code `0`
+4. Close the RabbitMQ channel and connection (`bus.close()`)
+5. Drain PostgreSQL connection pool (`pool.end()`)
+6. Quit Redis client if connected (`redisClient.quit()`)
+7. Process exits with code `0`

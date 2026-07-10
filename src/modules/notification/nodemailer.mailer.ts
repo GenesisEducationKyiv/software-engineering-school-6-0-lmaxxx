@@ -1,7 +1,8 @@
 import nodemailer from 'nodemailer';
-import { config } from '../config.js';
-import { emailsSentTotal } from '../metrics.js';
-import { logger } from '../logger.js';
+import { config } from '../../config.js';
+import { emailsSentTotal } from '../../metrics.js';
+import { logger } from '../../logger.js';
+import type { Mailer } from './ports/mailer.js';
 
 const transporter = nodemailer.createTransport({
   host: config.smtp.host,
@@ -11,12 +12,15 @@ const transporter = nodemailer.createTransport({
     : undefined,
 });
 
-export async function sendConfirmationEmail(
+async function sendConfirmationEmail(
   email: string,
   repo: string,
   confirmToken: string,
+  sagaId?: string,
 ): Promise<void> {
-  const confirmUrl = `${config.baseUrl}/api/confirm/${confirmToken}`;
+  const confirmUrl = sagaId
+    ? `${config.baseUrl}/api/confirm/${confirmToken}?sagaId=${sagaId}`
+    : `${config.baseUrl}/api/confirm/${confirmToken}`;
   await transporter.sendMail({
     from: config.smtp.from,
     to: email,
@@ -31,7 +35,7 @@ export async function sendConfirmationEmail(
   logger.info({ email, repo }, 'Confirmation email sent');
 }
 
-export async function sendReleaseNotification(
+async function sendReleaseNotification(
   email: string,
   repo: string,
   tag: string,
@@ -52,5 +56,15 @@ export async function sendReleaseNotification(
     ].join('\n'),
   });
   emailsSentTotal.inc({ type: 'release' });
-  logger.info({ email, repo, tag }, 'Release notification email sent');
+}
+
+export function createNodemailerMailer(): Mailer {
+  return {
+    sendConfirmation(email, repo, confirmToken, sagaId) {
+      return sendConfirmationEmail(email, repo, confirmToken, sagaId);
+    },
+    sendReleaseNotification(email, repo, tag, unsubscribeToken) {
+      return sendReleaseNotification(email, repo, tag, unsubscribeToken);
+    },
+  };
 }

@@ -1,9 +1,8 @@
 export {
+  createSubscriptionService,
   validateRepoFormat,
-  createSubscription,
-  confirmSubscription,
-  unsubscribeUser,
-  getSubscriptionsByEmail,
+  AppError,
+  type SubscriptionService,
 } from './subscription.service.js';
 
 export { getConfirmedSubscribers } from './subscription.repository.js';
