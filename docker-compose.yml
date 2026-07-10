@@ -25,6 +25,17 @@ services:
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # Management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   mailhog:
     image: mailhog/mailhog
     ports:
@@ -50,6 +61,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://app:secret@postgres:5432/github_notifier
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
@@ -59,6 +72,7 @@ services:
       SCAN_INTERVAL_MS: ${SCAN_INTERVAL_MS:-60000}
       BASE_URL: ${BASE_URL:-http://localhost:3000}
       REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
 
 volumes:
   postgres_data:

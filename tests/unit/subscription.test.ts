@@ -5,6 +5,7 @@ import {
   confirmSubscription,
   unsubscribeUser,
 } from '../../src/modules/subscription/subscription.service.js';
+import { RoutingKeys } from '../../src/shared/events.js';
 import type { Subscription } from '../../src/types.js';
 
 vi.mock('uuid', () => ({
@@ -15,8 +16,9 @@ vi.mock('../../src/modules/github/index.js', () => ({
   checkRepoExists: vi.fn(),
 }));
 
-vi.mock('../../src/infra/mailer.js', () => ({
-  sendConfirmationEmail: vi.fn(),
+const mockPublish = vi.fn();
+vi.mock('../../src/infra/messaging/index.js', () => ({
+  getBus: () => ({ publish: mockPublish }),
 }));
 
 vi.mock('../../src/modules/subscription/subscription.repository.js', () => ({
@@ -33,7 +35,6 @@ vi.mock('../../src/modules/subscription/subscription.repository.js', () => ({
 
 import { v4 as uuidv4 } from 'uuid';
 import { checkRepoExists } from '../../src/modules/github/index.js';
-import { sendConfirmationEmail } from '../../src/infra/mailer.js';
 import {
   findByEmailAndRepo,
   insertSubscription,
@@ -46,7 +47,6 @@ import {
 
 const mockUuid = vi.mocked(uuidv4);
 const mockCheckRepoExists = vi.mocked(checkRepoExists);
-const mockSendConfirmationEmail = vi.mocked(sendConfirmationEmail);
 const mockFindByEmailAndRepo = vi.mocked(findByEmailAndRepo);
 const mockInsertSubscription = vi.mocked(insertSubscription);
 const mockUpdateConfirmToken = vi.mocked(updateConfirmToken);
@@ -106,7 +106,7 @@ describe('createSubscription', () => {
       .mockReturnValueOnce('confirm-token' as unknown as `${string}-${string}-${string}-${string}-${string}`)
       .mockReturnValueOnce('unsub-token' as unknown as `${string}-${string}-${string}-${string}-${string}`);
     mockInsertSubscription.mockResolvedValue(makeSub());
-    mockSendConfirmationEmail.mockResolvedValue(undefined);
+    mockPublish.mockResolvedValue(undefined);
 
     await createSubscription('user@example.com', 'owner/repo');
 
@@ -117,7 +117,11 @@ describe('createSubscription', () => {
       'confirm-token',
       'unsub-token',
     );
-    expect(mockSendConfirmationEmail).toHaveBeenCalledWith('user@example.com', 'owner/repo', 'confirm-token');
+    expect(mockPublish).toHaveBeenCalledWith(RoutingKeys.SubscriptionCreated, {
+      email: 'user@example.com',
+      repo: 'owner/repo',
+      confirmToken: 'confirm-token',
+    });
   });
 
   it('throws AppError(400) for invalid repo format without calling anything', async () => {
@@ -156,12 +160,16 @@ describe('createSubscription', () => {
     mockFindByEmailAndRepo.mockResolvedValue(existingSub);
     mockUuid.mockReturnValueOnce('new-token' as unknown as `${string}-${string}-${string}-${string}-${string}`);
     mockUpdateConfirmToken.mockResolvedValue(undefined);
-    mockSendConfirmationEmail.mockResolvedValue(undefined);
+    mockPublish.mockResolvedValue(undefined);
 
     await createSubscription('user@example.com', 'owner/repo');
 
     expect(mockUpdateConfirmToken).toHaveBeenCalledWith(1, 'new-token');
-    expect(mockSendConfirmationEmail).toHaveBeenCalledWith('user@example.com', 'owner/repo', 'new-token');
+    expect(mockPublish).toHaveBeenCalledWith(RoutingKeys.SubscriptionCreated, {
+      email: 'user@example.com',
+      repo: 'owner/repo',
+      confirmToken: 'new-token',
+    });
     expect(mockInsertSubscription).not.toHaveBeenCalled();
   });
 
@@ -174,7 +182,7 @@ describe('createSubscription', () => {
     });
 
     expect(mockInsertSubscription).not.toHaveBeenCalled();
-    expect(mockSendConfirmationEmail).not.toHaveBeenCalled();
+    expect(mockPublish).not.toHaveBeenCalled();
   });
 });
 

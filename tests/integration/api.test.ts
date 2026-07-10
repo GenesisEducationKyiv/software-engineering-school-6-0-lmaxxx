@@ -4,7 +4,11 @@ import request from 'supertest';
 vi.mock('../../src/modules/subscription/subscription.repository.js');
 vi.mock('../../src/modules/repository/repository.repository.js');
 vi.mock('../../src/modules/github/github.service.js');
-vi.mock('../../src/infra/mailer.js');
+
+const mockPublish = vi.fn();
+vi.mock('../../src/infra/messaging/index.js', () => ({
+  getBus: () => ({ publish: mockPublish }),
+}));
 
 import { app } from '../../src/app.js';
 import {
@@ -19,7 +23,7 @@ import {
 } from '../../src/modules/subscription/subscription.repository.js';
 import { upsertRepository } from '../../src/modules/repository/repository.repository.js';
 import { checkRepoExists } from '../../src/modules/github/github.service.js';
-import { sendConfirmationEmail } from '../../src/infra/mailer.js';
+import { RoutingKeys } from '../../src/shared/events.js';
 import { AppError } from '../../src/shared/appError.js';
 import type { Subscription, SubscriptionResponse } from '../../src/types.js';
 
@@ -44,7 +48,7 @@ describe('POST /api/subscribe', () => {
     vi.mocked(findByEmailAndRepo).mockResolvedValue(null);
     vi.mocked(insertSubscription).mockResolvedValue(makeSub());
     vi.mocked(upsertRepository).mockResolvedValue(undefined);
-    vi.mocked(sendConfirmationEmail).mockResolvedValue(undefined);
+    mockPublish.mockResolvedValue(undefined);
 
     const res = await request(app)
       .post('/api/subscribe')
@@ -52,14 +56,17 @@ describe('POST /api/subscribe', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ message: 'Confirmation email sent' });
-    expect(sendConfirmationEmail).toHaveBeenCalledOnce();
+    expect(mockPublish).toHaveBeenCalledWith(
+      RoutingKeys.SubscriptionCreated,
+      expect.objectContaining({ email: 'test@example.com', repo: 'owner/repo' }),
+    );
   });
 
   it('returns 200 and resends confirmation for an existing unconfirmed subscription', async () => {
     vi.mocked(checkRepoExists).mockResolvedValue(undefined);
     vi.mocked(findByEmailAndRepo).mockResolvedValue(makeSub({ confirmed: false }));
     vi.mocked(updateConfirmToken).mockResolvedValue(undefined);
-    vi.mocked(sendConfirmationEmail).mockResolvedValue(undefined);
+    mockPublish.mockResolvedValue(undefined);
 
     const res = await request(app)
       .post('/api/subscribe')
@@ -67,7 +74,7 @@ describe('POST /api/subscribe', () => {
 
     expect(res.status).toBe(200);
     expect(updateConfirmToken).toHaveBeenCalledOnce();
-    expect(sendConfirmationEmail).toHaveBeenCalledOnce();
+    expect(mockPublish).toHaveBeenCalledOnce();
   });
 
   it('returns 400 when email is missing', async () => {

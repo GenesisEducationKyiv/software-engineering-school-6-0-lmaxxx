@@ -2,7 +2,7 @@
 
 Subscribe an email address to GitHub repository releases. When a new release is published, confirmed subscribers receive an email notification.
 
-Three components run in a **single Node.js process**: an **API** (Express REST), a **Scanner** (periodic GitHub poller), and a **Notifier** (transactional email via SMTP).
+Three modules run in a **single Node.js process** (a modular monolith): an **API** (Express REST), a **Scanner** (periodic GitHub poller), and a **Notification** module (transactional email via SMTP). The Scanner and API don't send email directly — they publish **domain events** to a **RabbitMQ** topic exchange, and the Notification module consumes those events and sends the mail. This decouples the modules and keeps the email side asynchronous.
 
 > **Live Preview:** [Frontend UI](https://github-notifier-production-f138.up.railway.app/)
 >
@@ -20,7 +20,9 @@ Three components run in a **single Node.js process**: an **API** (Express REST),
          ├─ validate email format and "owner/repo" pattern
          ├─ check repo exists on GitHub API  (result cached in Redis)
          ├─ insert unconfirmed row into subscriptions table
-         └─ send confirmation email  ──► link to GET /api/confirm/:token
+         └─ publish `subscription.created` event
+              └─► Notification module consumes it and sends the
+                  confirmation email ──► link to GET /api/confirm/:token
 
 2. User clicks the confirmation link
    └─► GET /api/confirm/:token
@@ -39,11 +41,26 @@ setInterval fires
             ├─ GET /repos/:owner/:repo/releases/latest  (Redis cached, default 10 min TTL)
             ├─ if tag_name ≠ last_seen_tag in DB:
             │    ├─ UPDATE repositories SET last_seen_tag = <new tag>
-            │    └─ for each confirmed subscriber:
-            │         └─ send release notification email (includes unsubscribe link)
+            │    └─ publish `release.published` { repo, tag } event
             └─ if GitHub returns 429 → break loop, retry on next interval
   └─ increment scans_total Prometheus counter
+
+The Notification module consumes `release.published`, looks up the repo's
+confirmed subscribers, and sends each a release notification email (with an
+unsubscribe link).
 ```
+
+### Messaging
+
+```
+exchange: domain.events   (topic, durable)
+   ├─ subscription.created ─┐
+   └─ release.published ────┴─► queue: notification  ─► Notification module
+```
+
+Publishers (API, Scanner) and the consumer (Notification module) talk only
+through the broker. Messages are acked after the email is sent; a failed handler
+nacks + requeues (at-least-once delivery).
 
 ### Startup Sequence
 
@@ -51,10 +68,11 @@ setInterval fires
 
 ```
 1. Run DB migrations (node-pg-migrate, auto-applied on every start)
-2. Start HTTP server on PORT
-3. Start scanner setInterval
-4. Start gRPC server on GRPC_PORT
-5. Register SIGTERM / SIGINT handlers for graceful shutdown
+2. Connect to RabbitMQ and start the Notification module consumer
+3. Start HTTP server on PORT
+4. Start scanner setInterval
+5. Start gRPC server on GRPC_PORT
+6. Register SIGTERM / SIGINT handlers for graceful shutdown
 ```
 
 ---
@@ -72,6 +90,7 @@ docker-compose up
 | http://localhost:3000 | Web UI and REST API |
 | http://localhost:8025 | Mailhog — inspect emails sent during development |
 | http://localhost:8080 | Swagger UI — interactive API docs |
+| http://localhost:15672 | RabbitMQ management UI (guest / guest) |
 
 All services start automatically. PostgreSQL migrations run on app startup before the server accepts connections.
 
@@ -79,7 +98,7 @@ All services start automatically. PostgreSQL migrations run on app startup befor
 
 ## Local Development Setup
 
-**Prerequisites:** Node.js 20+, PostgreSQL, (optional) Redis
+**Prerequisites:** Node.js 20+, PostgreSQL, RabbitMQ, (optional) Redis
 
 ```bash
 # 1. Install dependencies

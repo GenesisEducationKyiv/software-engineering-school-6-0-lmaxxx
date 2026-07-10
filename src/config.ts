@@ -35,4 +35,6 @@ export const config = {
 
   redisUrl: process.env['REDIS_URL'] ?? null,
   redisTtlSeconds: parseInt(optional('REDIS_TTL_SECONDS', '600'), 10),
+
+  rabbitmqUrl: optional('RABBITMQ_URL', 'amqp://guest:guest@localhost:5672'),
 } as const;

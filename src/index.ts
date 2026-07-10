@@ -7,6 +7,8 @@ import { startScanner } from './modules/repository/index.js';
 import { pool } from './infra/db/pool.js';
 import { redisClient } from './infra/cache/redis.js';
 import { startGrpcServer } from './interfaces/grpc.js';
+import { connectBus } from './infra/messaging/index.js';
+import { startNotificationConsumer } from './modules/notification/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,6 +21,9 @@ async function main() {
     dir: join(__dirname, '..', 'migrations'),
     log: console.log,
   });
+
+  const bus = await connectBus();
+  await startNotificationConsumer(bus);
 
   const server = app.listen(config.port, () => {
     console.log(`Server listening on port ${config.port}`);
@@ -40,6 +45,7 @@ async function main() {
     forceExit.unref();
 
     server.close(async () => {
+      await bus.close();
       await pool.end();
       await redisClient?.quit();
       console.log('Shutdown complete');
