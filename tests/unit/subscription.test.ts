@@ -24,6 +24,16 @@ vi.mock('../../src/modules/subscription/subscription.repository.js', () => ({
   getConfirmedSubscribers: vi.fn(),
 }));
 
+vi.mock('../../src/logger.js', () => ({
+  logger: {
+    info:  vi.fn(),
+    warn:  vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    fatal: vi.fn(),
+  },
+}));
+
 import {
   findByEmailAndRepo,
   findByConfirmToken,

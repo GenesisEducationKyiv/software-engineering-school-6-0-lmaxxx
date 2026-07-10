@@ -5,6 +5,9 @@ import * as protoLoader from '@grpc/proto-loader';
 import type { SubscriptionService } from '../modules/subscription/index.js';
 import { AppError } from '../shared/appError.js';
 import { EMAIL_REGEX } from '../validators/index.js';
+import { logger } from '../logger.js';
+import { grpcRequestsTotal, grpcRequestDurationSeconds } from '../metrics.js';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -36,15 +39,60 @@ function toGrpcStatus(httpStatus: number): grpc.status {
   }
 }
 
-function handleError<T>(err: unknown, callback: grpc.sendUnaryData<T>): void {
+function handleError<T>(
+  err: unknown,
+  callback: grpc.sendUnaryData<T>,
+  ctx: { method: string; email?: string },
+): void {
+  const grpcStatus = err instanceof AppError ? toGrpcStatus(err.status) : grpc.status.INTERNAL;
+  logger.error(
+    { err, method: ctx.method, email: ctx.email, grpcStatus: grpc.status[grpcStatus] },
+    'gRPC handler error',
+  );
   if (err instanceof AppError) {
-    callback({ code: toGrpcStatus(err.status), message: err.message });
+    callback({ code: grpcStatus, message: err.message });
   } else {
     callback({
       code: grpc.status.INTERNAL,
       message: err instanceof Error ? err.message : 'Internal server error',
     });
   }
+}
+
+function withGrpcMetrics<Req, Res>(
+  methodName: string,
+  handler: (
+    call: grpc.ServerUnaryCall<Req, Res>,
+    callback: grpc.sendUnaryData<Res>,
+  ) => Promise<void>,
+) {
+  return async (
+    call: grpc.ServerUnaryCall<Req, Res>,
+    callback: grpc.sendUnaryData<Res>,
+  ): Promise<void> => {
+    const end = grpcRequestDurationSeconds.startTimer();
+    let statusLabel = 'OK';
+    const wrappedCb: grpc.sendUnaryData<Res> = (err, value, ...rest) => {
+      if (err) {
+        const code = (err as grpc.ServiceError).code ?? grpc.status.INTERNAL;
+        statusLabel = grpc.status[code] ?? 'UNKNOWN';
+      }
+      grpcRequestsTotal.inc({ method: methodName, status: statusLabel });
+      end({ method: methodName, status: statusLabel });
+      (callback as (...args: unknown[]) => void)(err, value, ...rest);
+    };
+
+    try {
+      await handler(call, wrappedCb);
+    } catch (err) {
+      grpcRequestsTotal.inc({ method: methodName, status: 'INTERNAL' });
+      end({ method: methodName, status: 'INTERNAL' });
+      callback({
+        code: grpc.status.INTERNAL,
+        message: err instanceof Error ? err.message : 'Internal server error',
+      });
+    }
+  };
 }
 
 interface SubscribeRequest   { email: string; repo: string }
@@ -74,7 +122,7 @@ export function createGrpcServer(service: SubscriptionService): grpc.Server {
       await service.subscribe(email, repo);
       callback(null, { message: 'Confirmation email sent' });
     } catch (err) {
-      handleError(err, callback);
+      handleError(err, callback, { method: 'Subscribe', email });
     }
   }
 
@@ -90,7 +138,7 @@ export function createGrpcServer(service: SubscriptionService): grpc.Server {
       await service.confirm(token);
       callback(null, { message: 'Subscription confirmed' });
     } catch (err) {
-      handleError(err, callback);
+      handleError(err, callback, { method: 'ConfirmSubscription' });
     }
   }
 
@@ -106,7 +154,7 @@ export function createGrpcServer(service: SubscriptionService): grpc.Server {
       await service.unsubscribe(token);
       callback(null, { message: 'Unsubscribed successfully' });
     } catch (err) {
-      handleError(err, callback);
+      handleError(err, callback, { method: 'Unsubscribe' });
     }
   }
 
@@ -128,16 +176,16 @@ export function createGrpcServer(service: SubscriptionService): grpc.Server {
       }));
       callback(null, { subscriptions });
     } catch (err) {
-      handleError(err, callback);
+      handleError(err, callback, { method: 'GetSubscriptions', email });
     }
   }
 
   const server = new grpc.Server();
   server.addService(proto.github_notifier.GitHubNotifier.service, {
-    subscribe,
-    confirmSubscription: confirmSubscriptionHandler,
-    unsubscribe: unsubscribeHandler,
-    getSubscriptions: getSubscriptionsHandler,
+    subscribe:            withGrpcMetrics('Subscribe', subscribe),
+    confirmSubscription:  withGrpcMetrics('ConfirmSubscription', confirmSubscriptionHandler),
+    unsubscribe:          withGrpcMetrics('Unsubscribe', unsubscribeHandler),
+    getSubscriptions:     withGrpcMetrics('GetSubscriptions', getSubscriptionsHandler),
   });
   return server;
 }
@@ -153,11 +201,11 @@ export function startGrpcServer(
       grpc.ServerCredentials.createInsecure(),
       (err, boundPort) => {
         if (err) {
-          console.warn(`gRPC server failed to start on port ${port}: ${err.message}`);
+          logger.warn({ port, err: err.message }, 'gRPC server failed to start');
           resolve(null);
           return;
         }
-        console.log(`gRPC server listening on port ${boundPort}`);
+        logger.info({ port: boundPort }, 'gRPC server listening');
         resolve(server);
       },
     );

@@ -22,7 +22,9 @@ import {
   deleteSubscription,
   findConfirmedByEmail,
 } from './subscription.repository.js';
+import { logger } from '../../logger.js';
 import type { SubscriptionResponse } from '../../types.js';
+
 
 export { AppError };
 
@@ -76,6 +78,10 @@ export function createSubscriptionService(deps: {
       await save(sub);
       await registrar.ensureTracked(repo);
       await publishCreated(sub);
+      logger.info(
+        { email, repo },
+        existing ? 'Resent confirmation email for existing unconfirmed subscription' : 'New subscription created',
+      );
     },
 
     async reserve(emailInput, repoInput) {
@@ -107,6 +113,7 @@ export function createSubscriptionService(deps: {
         throw new AppError(404, 'Confirmation token not found');
       }
       await save(confirmSubscription(existing));
+      logger.info({ token }, 'Subscription confirmed');
     },
 
     async unsubscribe(token) {
@@ -116,6 +123,7 @@ export function createSubscriptionService(deps: {
         throw new AppError(404, 'Token not found');
       }
       await deleteSubscription(existing.id!);
+      logger.info({ token }, 'User unsubscribed');
     },
 
     listByEmail(email) {

@@ -39,4 +39,6 @@ export const config = {
   redisTtlSeconds: parseInt(optional('REDIS_TTL_SECONDS', '600'), 10),
 
   rabbitmqUrl: optional('RABBITMQ_URL', 'amqp://guest:guest@localhost:5672'),
+
+  logLevel: optional('LOG_LEVEL', 'info'),
 } as const;
