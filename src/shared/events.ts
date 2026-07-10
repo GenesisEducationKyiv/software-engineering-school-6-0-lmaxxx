@@ -10,6 +10,7 @@ export const EXCHANGE = 'domain.events';
 export const RoutingKeys = {
   SubscriptionCreated: 'subscription.created',
   ReleasePublished: 'release.published',
+  NotificationSend: 'notification.send',
 } as const;
 
 export type RoutingKey = (typeof RoutingKeys)[keyof typeof RoutingKeys];
@@ -25,8 +26,16 @@ export interface ReleasePublishedEvent {
   tag: string;
 }
 
+export interface NotificationSendEvent {
+  email: string;
+  repo: string;
+  tag: string;
+  unsubscribeToken: string;
+}
+
 /** Maps each routing key to its payload type. */
 export interface EventPayloads {
   [RoutingKeys.SubscriptionCreated]: SubscriptionCreatedEvent;
   [RoutingKeys.ReleasePublished]: ReleasePublishedEvent;
+  [RoutingKeys.NotificationSend]: NotificationSendEvent;
 }

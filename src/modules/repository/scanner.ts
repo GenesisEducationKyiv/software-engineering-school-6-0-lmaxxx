@@ -1,37 +1,51 @@
-import { getReposWithConfirmedSubscriptions, updateLastSeenTag } from './repository.repository.js';
-import { getLatestRelease } from '../github/index.js';
-import { getBus } from '../../infra/messaging/index.js';
+import { findReposWithConfirmedSubscriptions, save } from './repository.repository.js';
+import { applyLatestRelease } from './domain/tracked-repository.js';
 import { RoutingKeys } from '../../shared/events.js';
 import { config } from '../../config.js';
 import { AppError } from '../../shared/appError.js';
 import { scansTotal } from '../../metrics.js';
+import type { ReleaseFetcher } from './ports/release-fetcher.js';
+import type { EventBus } from '../../infra/messaging/index.js';
 
-export function startScanner(): NodeJS.Timeout {
-  const run = async () => {
-    const repos = await getReposWithConfirmedSubscriptions();
-    for (const repo of repos) {
-      try {
-        const latest = await getLatestRelease(repo.repo);
-        if (latest && latest.tag_name !== repo.last_seen_tag) {
-          await updateLastSeenTag(repo.id, latest.tag_name);
-          await getBus().publish(RoutingKeys.ReleasePublished, {
-            repo: repo.repo,
-            tag: latest.tag_name,
-          });
+export type ReleaseScanService = {
+  scanOnce(): Promise<void>;
+};
+
+export function createReleaseScanService(deps: {
+  releases: ReleaseFetcher;
+  bus: EventBus;
+}): ReleaseScanService {
+  const { releases, bus } = deps;
+
+  return {
+    async scanOnce() {
+      const repos = await findReposWithConfirmedSubscriptions();
+      for (const repo of repos) {
+        try {
+          const tag = await releases.fetchLatestTag(repo.repo);
+          if (tag) {
+            const updated = applyLatestRelease(repo, tag);
+            if (updated) {
+              await save(updated);
+              await bus.publish(RoutingKeys.ReleasePublished, { repo: updated.repo, tag });
+            }
+          }
+        } catch (err: unknown) {
+          if (err instanceof AppError && err.status === 429) {
+            console.warn('GitHub rate limit hit during scan, skipping remaining repos');
+            break;
+          }
+          console.error(`Error scanning ${repo.repo}:`, err);
         }
-      } catch (err: unknown) {
-        if (err instanceof AppError && err.status === 429) {
-          console.warn('GitHub rate limit hit during scan, skipping remaining repos');
-          break;
-        }
-        console.error(`Error scanning ${repo.repo}:`, err);
       }
-    }
-    scansTotal.inc();
+      scansTotal.inc();
+    },
   };
+}
 
+export function startScanner(service: ReleaseScanService): NodeJS.Timeout {
   const interval = setInterval(() => {
-    run().catch((err) => console.error('Scanner cycle failed:', err));
+    service.scanOnce().catch((err) => console.error('Scanner cycle failed:', err));
   }, config.scanIntervalMs);
 
   console.log(`Scanner started (interval: ${config.scanIntervalMs}ms)`);

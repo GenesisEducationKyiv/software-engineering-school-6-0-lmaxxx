@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
-import { config } from '../config.js';
-import { emailsSentTotal } from '../metrics.js';
+import { config } from '../../config.js';
+import { emailsSentTotal } from '../../metrics.js';
+import type { Mailer } from './ports/mailer.js';
 
 const transporter = nodemailer.createTransport({
   host: config.smtp.host,
@@ -10,7 +11,7 @@ const transporter = nodemailer.createTransport({
     : undefined,
 });
 
-export async function sendConfirmationEmail(
+async function sendConfirmationEmail(
   email: string,
   repo: string,
   confirmToken: string,
@@ -29,7 +30,7 @@ export async function sendConfirmationEmail(
   emailsSentTotal.inc({ type: 'confirmation' });
 }
 
-export async function sendReleaseNotification(
+async function sendReleaseNotification(
   email: string,
   repo: string,
   tag: string,
@@ -50,4 +51,15 @@ export async function sendReleaseNotification(
     ].join('\n'),
   });
   emailsSentTotal.inc({ type: 'release' });
+}
+
+export function createNodemailerMailer(): Mailer {
+  return {
+    sendConfirmation(email, repo, confirmToken) {
+      return sendConfirmationEmail(email, repo, confirmToken);
+    },
+    sendReleaseNotification(email, repo, tag, unsubscribeToken) {
+      return sendReleaseNotification(email, repo, tag, unsubscribeToken);
+    },
+  };
 }

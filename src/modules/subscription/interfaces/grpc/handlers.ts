@@ -1,0 +1,107 @@
+import * as grpc from '@grpc/grpc-js';
+import { AppError } from '../../../../shared/appError.js';
+import type { SubscriptionService } from '../../subscription.service.js';
+
+function toGrpcStatus(httpStatus: number): grpc.status {
+  switch (httpStatus) {
+    case 400: return grpc.status.INVALID_ARGUMENT;
+    case 404: return grpc.status.NOT_FOUND;
+    case 409: return grpc.status.ALREADY_EXISTS;
+    case 429: return grpc.status.RESOURCE_EXHAUSTED;
+    default:  return grpc.status.INTERNAL;
+  }
+}
+
+function handleError<T>(err: unknown, callback: grpc.sendUnaryData<T>): void {
+  if (err instanceof AppError) {
+    callback({ code: toGrpcStatus(err.status), message: err.message });
+  } else {
+    callback({
+      code: grpc.status.INTERNAL,
+      message: err instanceof Error ? err.message : 'Internal server error',
+    });
+  }
+}
+
+interface SubscribeRequest   { email: string; repo: string }
+interface TokenRequest       { token: string }
+interface GetSubsRequest     { email: string }
+interface MessageResponse    { message: string }
+interface SubscriptionItem   {
+  email: string; repo: string; confirmed: boolean; last_seen_tag: string;
+}
+interface GetSubsResponse    { subscriptions: SubscriptionItem[] }
+
+/** Builds the gRPC service implementation around an injected subscription service. */
+export function buildGrpcServiceImpl(service: SubscriptionService): grpc.UntypedServiceImplementation {
+  async function subscribe(
+    call: grpc.ServerUnaryCall<SubscribeRequest, MessageResponse>,
+    callback: grpc.sendUnaryData<MessageResponse>,
+  ): Promise<void> {
+    const { email, repo } = call.request;
+    try {
+      await service.subscribe(email, repo);
+      callback(null, { message: 'Confirmation email sent' });
+    } catch (err) {
+      handleError(err, callback);
+    }
+  }
+
+  async function confirmSubscriptionHandler(
+    call: grpc.ServerUnaryCall<TokenRequest, MessageResponse>,
+    callback: grpc.sendUnaryData<MessageResponse>,
+  ): Promise<void> {
+    const { token } = call.request;
+    if (!token) {
+      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'token is required' });
+    }
+    try {
+      await service.confirm(token);
+      callback(null, { message: 'Subscription confirmed' });
+    } catch (err) {
+      handleError(err, callback);
+    }
+  }
+
+  async function unsubscribeHandler(
+    call: grpc.ServerUnaryCall<TokenRequest, MessageResponse>,
+    callback: grpc.sendUnaryData<MessageResponse>,
+  ): Promise<void> {
+    const { token } = call.request;
+    if (!token) {
+      return callback({ code: grpc.status.INVALID_ARGUMENT, message: 'token is required' });
+    }
+    try {
+      await service.unsubscribe(token);
+      callback(null, { message: 'Unsubscribed successfully' });
+    } catch (err) {
+      handleError(err, callback);
+    }
+  }
+
+  async function getSubscriptionsHandler(
+    call: grpc.ServerUnaryCall<GetSubsRequest, GetSubsResponse>,
+    callback: grpc.sendUnaryData<GetSubsResponse>,
+  ): Promise<void> {
+    const { email } = call.request;
+    try {
+      const rows = await service.listByEmail(email.trim());
+      const subscriptions: SubscriptionItem[] = rows.map((s) => ({
+        email:         s.email,
+        repo:          s.repo,
+        confirmed:     s.confirmed,
+        last_seen_tag: s.last_seen_tag ?? '',
+      }));
+      callback(null, { subscriptions });
+    } catch (err) {
+      handleError(err, callback);
+    }
+  }
+
+  return {
+    subscribe,
+    confirmSubscription: confirmSubscriptionHandler,
+    unsubscribe: unsubscribeHandler,
+    getSubscriptions: getSubscriptionsHandler,
+  };
+}
