@@ -2,7 +2,11 @@
 
 ## 1. Overview
 
-The GitHub Release Notifier is a Node.js service that lets users subscribe their email address to a GitHub repository. When a new release is published, all confirmed subscribers receive an email notification containing the release tag, title, and a direct link to the release page. The system is a **modular monolith** running inside a **single Node.js process**: a REST API, a background scanner, a gRPC server, and a notification module. Modules communicate asynchronously by publishing **domain events** to a **RabbitMQ** topic exchange; the notification module consumes those events and sends email.
+The GitHub Release Notifier is a Node.js service that lets users subscribe their email address to a GitHub repository. When a new release is published, all confirmed subscribers receive an email notification containing the release tag, title, and a direct link to the release page. The system is a **modular monolith** running inside a **single Node.js process**: a REST API, a background scanner, two gRPC servers (a business API and a RepoVerification service), and a notification module. Modules communicate asynchronously by publishing **domain events** to a **RabbitMQ** topic exchange; the notification module consumes those events and sends email.
+
+Subscription creation runs as an **orchestrated saga** with a **transactional outbox**, so the multi-step flow (reserve → send confirmation email → wait for confirmation) is durable and compensatable across a crash. Repo existence checks can run in-process over the GitHub REST API or over a **gRPC RepoVerification transport**, selectable with the `REPO_CHECKER` env var.
+
+> **Diagrams:** the up-to-date visual architecture (Mermaid) — including the saga, outbox, and gRPC transports — lives in [`architecture.md`](./architecture.md). The ASCII diagram below is a simplified event-flow overview.
 
 ---
 
@@ -43,35 +47,42 @@ Modules are decoupled through the **RabbitMQ** broker: publishers (subscription,
 
 ## 3. Data Flow
 
-### 3.1 Subscribe (POST /api/subscribe)
+### 3.1 Subscribe (POST /api/subscribe) — orchestrated saga
+
+`POST /api/subscribe` starts the `CREATE_SUBSCRIPTION` saga. Saga and step state persist in
+Postgres and the confirmation command is dispatched through the transactional outbox, so
+the flow survives a crash (resumed by `recoverPendingSagas` on startup).
 
 ```
 Client
-  │
+  │  POST /api/subscribe { email, repo }
   ▼
-Express route (src/routes/subscribe.ts)
-  │  validate: email format, "owner/repo" pattern
-  ▼
-SubscriptionService.createSubscription()
+Express route → validate → orchestrator.start(CREATE_SUBSCRIPTION, { email, repo })
   │
-  ├─► GitHubService.checkRepoExists(repo)
-  │       └─► Redis GET  →  hit: return cached result
-  │                     →  miss: GitHub GET /repos/:owner/:repo
-  │                                └─► Redis SET (TTL 10 min)
+  ├─ Step reserve (LOCAL) → SubscriptionService.reserve()
+  │     ├─► RepositoryChecker.ensureExists(repo)   (REST or gRPC RepoVerification)
+  │     ├─► DB: save subscription (INSERT/UPDATE, confirmed=false)
+  │     └─► DB: ensureTracked repo (UPSERT repositories)
   │
-  ├─► DB: SELECT existing (email, repo) pair
-  │       └─► if confirmed already: 409
-  │           if unconfirmed: regenerate confirm_token, UPDATE row
-  │           if new: INSERT subscriptions row (confirmed=false)
+  ├─ Step sendEmail (ACTION) → INSERT outbox row (saga.email.send_confirmation)
+  │     │   (route returns 200 { message, sagaId } here)
+  │     ▼
+  │   Outbox publisher (1s poll) → RabbitMQ → notification handler
+  │     ├─► Nodemailer SMTP: confirmation link GET /api/confirm/:token?sagaId=…
+  │     └─► publish email.confirmation.sent → saga-replier → completeStep(sendEmail)
   │
-  ├─► DB: UPSERT repositories row
-  │
-  └─► publish `subscription.created` { email, repo, confirmToken }
-        └─► notification module consumes → Nodemailer SMTP →
-            confirmation link to GET /api/confirm/:token
-
-200 { message: "Confirmation email sent" }
+  └─ Step waitConfirmation (WAIT, 24h) — paused until:
+        GET /api/confirm/:token?sagaId=… → confirm subscription
+          → completeStep(waitConfirmation) → saga COMPLETED
 ```
+
+**Compensation:** a step failure (or `email.confirmation.failed`) drives the saga into
+`COMPENSATING`; completed steps compensate in reverse. `reserve`/`waitConfirmation` call
+`SubscriptionService.cancel(subscriptionId)` only when the saga created the row
+(`created === true`), leaving a pre-existing pending subscription intact.
+
+> The non-saga `SubscriptionService.subscribe()` path (direct `subscription.created` event)
+> still exists and is used by the gRPC business API; see [`architecture.md`](./architecture.md) §5.
 
 ### 3.2 Confirm (GET /api/confirm/:token)
 
@@ -143,6 +154,7 @@ metrics: scans_total++
 | **Redis** | `ioredis` | `REDIS_URL`, `REDIS_TTL_SECONDS` | — | Connection errors caught at startup; cache layer returns `null`, app continues uncached |
 | **PostgreSQL** | `pg` (pool) | `DATABASE_URL` | — | Pool errors propagate as unhandled rejections; pool drained on shutdown |
 | **RabbitMQ** | `amqplib` | `RABBITMQ_URL` | — | Topic exchange `domain.events`; consumer acks on success, nacks+requeues on handler failure (at-least-once); connection closed on shutdown |
+| **RepoVerification gRPC** | `@grpc/grpc-js` | `REPO_CHECKER`, `REPO_VERIFICATION_GRPC_PORT` | — | Thin gRPC front (`:50052`) over the REST GitHub checker; used only when `REPO_CHECKER=grpc`. HTTP status ↔ gRPC status mapping preserved both ways |
 
 ---
 
@@ -172,6 +184,16 @@ Interactive docs are available via Swagger UI at `http://localhost:8080` when ru
 
 See `proto/github_notifier.proto` for the full message definitions.
 
+### gRPC Service (`repo_verification/v1/repo_verification.proto`)
+
+Internal transport for repo-existence checks, used when `REPO_CHECKER=grpc`. Runs on
+`REPO_VERIFICATION_GRPC_PORT` (default `50052`) and delegates to the same REST
+`checkRepoExists`, so REST remains the single source of truth.
+
+| RPC | Request | Response |
+|-----|---------|---------|
+| `VerifyRepo` | `VerifyRepoRequest { repo }` | `VerifyRepoResponse { exists }` |
+
 ---
 
 ## 6. Configuration
@@ -182,7 +204,9 @@ All configuration is loaded from environment variables in `src/config.ts`. The o
 |----------|---------|----------|-------------|
 | `DATABASE_URL` | — | **yes** | PostgreSQL connection string |
 | `PORT` | `3000` | no | HTTP server port |
-| `GRPC_PORT` | `50051` | no | gRPC server port |
+| `GRPC_PORT` | `50051` | no | Main business gRPC server port |
+| `REPO_CHECKER` | `rest` | no | Repo-verification transport: `rest` (in-process axios) or `grpc` (RepoVerification service) |
+| `REPO_VERIFICATION_GRPC_PORT` | `50052` | no | RepoVerification gRPC server port |
 | `NODE_ENV` | `development` | no | Runtime environment label |
 | `GITHUB_TOKEN` | `null` | no | GitHub personal access token (raises rate limit from 60 to 5000 req/hr) |
 | `REDIS_URL` | `null` | no | Redis connection URL; caching is disabled when absent |
@@ -219,19 +243,25 @@ Unmatched routes are normalized to the label value `unknown` to prevent high-car
 ### Startup (`src/index.ts`)
 
 1. Run pending database migrations (node-pg-migrate, direction: up)
-2. Connect to RabbitMQ and start the notification module consumer
-3. Start HTTP server on `PORT`
-4. Start scanner `setInterval` with period `SCAN_INTERVAL_MS`
-5. Start gRPC server on `GRPC_PORT`
+2. Connect to RabbitMQ (`connectBus`)
+3. Start the RepoVerification gRPC server on `REPO_VERIFICATION_GRPC_PORT`
+4. Select the repo checker transport (`REPO_CHECKER`: `rest` or `grpc`)
+5. Register saga definitions and recover pending sagas (`recoverPendingSagas`)
+6. Start the notification module consumer
+7. Start the outbox publisher (1s poll interval)
+8. Start HTTP server on `PORT`
+9. Start scanner `setInterval` with period `SCAN_INTERVAL_MS`
+10. Start the main business gRPC server on `GRPC_PORT`
 
-Steps are sequential: the broker connects before any publisher runs, and the server only accepts traffic after migrations complete.
+Steps are sequential: the broker connects before any publisher runs, pending sagas are recovered before traffic is accepted, and the servers only accept traffic after migrations complete.
 
 ### Graceful Shutdown (SIGTERM / SIGINT)
 
-1. Clear scanner interval (stops future cycles; any in-progress cycle completes)
-2. Arm a 10-second forced-exit timeout
-3. Close HTTP server (stop accepting new connections; drain in-flight requests)
-4. Close the RabbitMQ channel and connection (`bus.close()`)
-5. Drain PostgreSQL connection pool (`pool.end()`)
-6. Quit Redis client if connected (`redisClient.quit()`)
-7. Process exits with code `0`
+1. Clear scanner and outbox-publisher intervals (stops future cycles; any in-progress cycle completes)
+2. Force-shutdown both gRPC servers (main + RepoVerification)
+3. Arm a 10-second forced-exit timeout
+4. Close HTTP server (stop accepting new connections; drain in-flight requests)
+5. Close the RabbitMQ channel and connection (`bus.close()`)
+6. Drain PostgreSQL connection pool (`pool.end()`)
+7. Quit Redis client if connected (`redisClient.quit()`)
+8. Process exits with code `0`

@@ -1,0 +1,15 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  # Legacy external-API proto is loaded dynamically via @grpc/proto-loader and
+  # predates buf; exclude it so DEFAULT rules only govern the new contract.
+  ignore:
+    - proto/github_notifier.proto
+breaking:
+  use:
+    - FILE
+  ignore:
+    - proto/github_notifier.proto
