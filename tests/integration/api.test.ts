@@ -23,13 +23,13 @@ import {
 import type { RepositoryChecker } from '../../src/modules/subscription/ports/repository-checker.js';
 import type { RepositoryRegistrar } from '../../src/modules/subscription/ports/repository-registrar.js';
 import type { EventBus } from '../../src/infra/messaging/index.js';
-import type { SubscriptionResponse } from '../../src/types.js';
+import type { SubscriptionResponse } from '../../src/modules/subscription/interfaces/http/dtos.js';
 
 const VALID_UUID = '00000000-0000-0000-0000-000000000000';
 
 const makeSub = (overrides: Partial<SubscriptionRow> = {}) =>
   subscriptionFromRow({
-    id: 1,
+    id: VALID_UUID,
     email: 'test@example.com',
     repo: 'owner/repo',
     confirmed: false,
@@ -68,7 +68,7 @@ describe('POST /api/subscribe', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ message: 'Confirmation email sent' });
-    expect(ensureTracked).toHaveBeenCalledWith('owner/repo');
+    expect(ensureTracked).not.toHaveBeenCalled();
     expect(publish).toHaveBeenCalledWith(
       RoutingKeys.SubscriptionCreated,
       expect.objectContaining({ email: 'test@example.com', repo: 'owner/repo' }),
@@ -156,6 +156,7 @@ describe('GET /api/confirm/:token', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ message: 'Subscription confirmed' });
     expect(save).toHaveBeenCalledOnce();
+    expect(ensureTracked).toHaveBeenCalledWith('owner/repo');
   });
 
   it('returns 400 when the subscription is already confirmed', async () => {
@@ -183,7 +184,7 @@ describe('GET /api/unsubscribe/:token', () => {
     const res = await request(app).get(`/api/unsubscribe/${VALID_UUID}`);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ message: 'Unsubscribed successfully' });
-    expect(deleteSubscription).toHaveBeenCalledWith(1);
+    expect(deleteSubscription).toHaveBeenCalledWith(VALID_UUID);
   });
 
   it('returns 400 for a malformed (non-UUID) token', async () => {

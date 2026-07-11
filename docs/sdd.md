@@ -41,7 +41,7 @@ Subscription creation runs as an **orchestrated saga** with a **transactional ou
                              (via axios, cached)
 ```
 
-Modules are decoupled through the **RabbitMQ** broker: publishers (subscription, scanner) emit domain events and never call the mailer directly; the notification module is the sole consumer. Delivery is at-least-once — the consumer acks after the work succeeds and nacks+requeues on failure. Release emails are fanned out as one `notification.send` message per recipient, so a single failed send only requeues that recipient rather than re-emailing the whole subscriber list. The scanner still runs in-process on a `setInterval`. Redis is optional; the service degrades gracefully to uncached GitHub API calls when Redis is unavailable.
+Modules are decoupled through the **RabbitMQ** broker: publishers (subscription, scanner) emit domain events and never call the mailer directly; the notification module is the sole consumer. Delivery is at-least-once — the consumer acks after a successful send and nacks+requeues on failure. The scanner still runs in-process on a `setInterval`. Redis is optional; the service degrades gracefully to uncached GitHub API calls when Redis is unavailable.
 
 ---
 
@@ -137,9 +137,7 @@ DB: SELECT DISTINCT repo FROM subscriptions WHERE confirmed = true
               └─► notification module consumes:
                     ├─► DB: SELECT confirmed subscribers for repo
                     └─► for each subscriber:
-                          └─► publish `notification.send` { email, repo, tag, unsubscribeToken }
-                                └─► notification module consumes (per recipient):
-                                      └─► Nodemailer SMTP (includes unsubscribe link)
+                          └─► Nodemailer SMTP (includes unsubscribe link)
   │
   ▼
 metrics: scans_total++

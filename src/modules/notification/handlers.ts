@@ -40,7 +40,7 @@ export function createNotificationHandlers(deps: {
 
     async onSagaEmailSendConfirmation(event) {
       try {
-        await mailer.sendConfirmation(event.email, event.repo, event.confirmToken);
+        await mailer.sendConfirmation(event.email, event.repo, event.confirmToken, event.sagaId);
         await bus.publish(RoutingKeys.EmailConfirmationSent, {
           sagaId: event.sagaId,
           email: event.email,

@@ -34,6 +34,8 @@ export const config = {
 
   scanIntervalMs: parseInt(optional('SCAN_INTERVAL_MS', '300000'), 10),
 
+  sagaTimeoutSweepIntervalMs: parseInt(optional('SAGA_TIMEOUT_SWEEP_INTERVAL_MS', String(60 * 60 * 1000)), 10),
+
   baseUrl: optional('BASE_URL', 'http://localhost:3000'),
 
   githubApiBaseUrl: optional('GITHUB_API_BASE_URL', 'https://api.github.com'),
@@ -42,4 +44,6 @@ export const config = {
   redisTtlSeconds: parseInt(optional('REDIS_TTL_SECONDS', '600'), 10),
 
   rabbitmqUrl: optional('RABBITMQ_URL', 'amqp://guest:guest@localhost:5672'),
+
+  logLevel: optional('LOG_LEVEL', 'info'),
 } as const;

@@ -6,26 +6,30 @@ import { createApp } from './app.js';
 import { pool } from './infra/db/pool.js';
 import { redisClient } from './infra/cache/redis.js';
 import { connectBus } from './infra/messaging/index.js';
-import { startGrpcServer } from './interfaces/grpc.js';
-import { startRepoVerificationServer } from './interfaces/repo-verification.server.js';
+import { startGrpcServer } from './infra/grpc/index.js';
+import { startRepoVerificationServer } from './modules/repository/interfaces/grpc/repo-verification.server.js';
+import { createSubscriptionService } from './modules/subscription/index.js';
+import { buildGrpcServiceImpl } from './modules/subscription/interfaces/grpc/handlers.js';
 import {
   createGitHubRepositoryChecker,
   createGrpcRepositoryChecker,
   createGitHubReleaseFetcher,
-} from './modules/github/index.js';
-import { createSubscriptionService } from './modules/subscription/index.js';
-import { createReleaseScanService, createRepositoryRegistrar, startScanner } from './modules/repository/index.js';
+  createReleaseScanService,
+  createRepositoryRegistrar,
+  startScanner,
+} from './modules/repository/index.js';
 import {
   startNotificationConsumer,
   createNotificationHandlers,
   createNodemailerMailer,
   createSubscriberDirectory,
 } from './modules/notification/index.js';
-import { createSagaOrchestrator, recoverPendingSagas } from './infra/saga/index.js';
+import { createSagaOrchestrator, recoverPendingSagas, startSagaTimeoutSweep } from './infra/saga/index.js';
 import { getDefinition, registerDefinition } from './modules/sagas/registry.js';
 import { createCreateSubscriptionSaga } from './modules/sagas/index.js';
 import { createSagaReplier } from './modules/sagas/saga-replier.js';
 import { startOutboxPublisher } from './infra/messaging/outbox-publisher.js';
+import { logger } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -36,7 +40,7 @@ async function main() {
     databaseUrl: config.databaseUrl,
     migrationsTable: 'pgmigrations',
     dir: join(__dirname, '..', 'migrations'),
-    log: console.log,
+    log: (msg: string) => logger.debug({ component: 'migration' }, msg),
   });
 
   const bus = await connectBus();
@@ -60,7 +64,7 @@ async function main() {
 
   registerDefinition(createCreateSubscriptionSaga(subscriptionService));
 
-  const sagaOrchestrator = createSagaOrchestrator(true);
+  const sagaOrchestrator = createSagaOrchestrator();
   await recoverPendingSagas(sagaOrchestrator, getDefinition);
 
   const sagaReplier = createSagaReplier(sagaOrchestrator);
@@ -73,25 +77,27 @@ async function main() {
   });
   await startNotificationConsumer(bus, handlers);
 
-  const outboxInterval = startOutboxPublisher(bus);
+  const outbox = startOutboxPublisher(bus);
 
   const server = createApp(subscriptionService, sagaOrchestrator).listen(config.port, () => {
-    console.log(`Server listening on port ${config.port}`);
+    logger.info({ port: config.port }, 'Server listening');
   });
 
   const scannerInterval = startScanner(releaseScanService);
+  const sagaTimeoutSweep = startSagaTimeoutSweep(sagaOrchestrator, getDefinition, config.sagaTimeoutSweepIntervalMs);
 
-  const grpcServer = await startGrpcServer(config.grpcPort, subscriptionService);
+  const grpcServer = await startGrpcServer(config.grpcPort, buildGrpcServiceImpl(subscriptionService));
 
   function shutdown(signal: string) {
-    console.log(`Received ${signal}, shutting down gracefully...`);
+    logger.info({ signal }, 'Received signal, shutting down gracefully');
     clearInterval(scannerInterval);
-    clearInterval(outboxInterval);
+    outbox.stop();
+    sagaTimeoutSweep.stop();
     grpcServer?.forceShutdown();
     repoVerificationServer?.forceShutdown();
 
     const forceExit = setTimeout(() => {
-      console.error('Forced shutdown after timeout');
+      logger.error('Forced shutdown after timeout');
       process.exit(1);
     }, 10_000);
     forceExit.unref();
@@ -100,7 +106,7 @@ async function main() {
       await bus.close();
       await pool.end();
       await redisClient?.quit();
-      console.log('Shutdown complete');
+      logger.info('Shutdown complete');
       clearTimeout(forceExit);
       process.exit(0);
     });
@@ -111,6 +117,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Startup failed:', err);
+  logger.fatal({ err }, 'Startup failed');
   process.exit(1);
 });

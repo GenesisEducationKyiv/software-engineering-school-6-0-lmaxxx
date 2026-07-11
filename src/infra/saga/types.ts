@@ -1,13 +1,27 @@
-export type SagaStatus =
-  | 'PENDING'
-  | 'STEP_IN_PROGRESS'
-  | 'COMPLETED'
-  | 'FAILED'
-  | 'COMPENSATING'
-  | 'COMPENSATED'
-  | 'CANCELLED';
+export const SagaStatus = {
+  Pending: 'PENDING',
+  StepInProgress: 'STEP_IN_PROGRESS',
+  Completed: 'COMPLETED',
+  Failed: 'FAILED',
+  Compensating: 'COMPENSATING',
+  Compensated: 'COMPENSATED',
+  Cancelled: 'CANCELLED',
+} as const;
+export type SagaStatus = (typeof SagaStatus)[keyof typeof SagaStatus];
 
-export type StepStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
+export const StepStatus = {
+  Pending: 'PENDING',
+  InProgress: 'IN_PROGRESS',
+  Completed: 'COMPLETED',
+  Failed: 'FAILED',
+} as const;
+export type StepStatus = (typeof StepStatus)[keyof typeof StepStatus];
+
+export const SagaStepKind = {
+  Forward: 'forward',
+  Compensate: 'compensate',
+} as const;
+export type SagaStepKind = (typeof SagaStepKind)[keyof typeof SagaStepKind];
 
 export interface SagaRecord {
   id: string;
@@ -26,7 +40,7 @@ export interface SagaStepRecord {
   sagaId: string;
   stepIndex: number;
   stepName: string;
-  stepType: 'forward' | 'compensate';
+  stepType: SagaStepKind;
   status: StepStatus;
   startedAt: Date | null;
   finishedAt: Date | null;
@@ -41,7 +55,12 @@ export interface SagaContext {
 export type SagaAction = (ctx: SagaContext) => Promise<Record<string, unknown> | void>;
 export type SagaCompensate = (ctx: SagaContext) => Promise<void>;
 
-export type SagaStepType = 'LOCAL' | 'ACTION' | 'WAIT';
+export const SagaStepType = {
+  Local: 'LOCAL',
+  Action: 'ACTION',
+  Wait: 'WAIT',
+} as const;
+export type SagaStepType = (typeof SagaStepType)[keyof typeof SagaStepType];
 
 export interface SagaStep {
   name: string;

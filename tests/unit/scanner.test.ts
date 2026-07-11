@@ -7,12 +7,22 @@ import { RoutingKeys } from '../../src/shared/events.js';
 import {
   trackedRepositoryFromRow,
   type RepositoryRow,
-} from '../../src/modules/repository/domain/tracked-repository.js';
+} from '../../src/modules/repository/tracked-repository.mapper.js';
 import { ReleaseTag } from '../../src/modules/repository/domain/release-tag.js';
 import { parseOrThrow } from '../../src/shared/domain/parse.js';
 import { AppError } from '../../src/shared/appError.js';
 import type { ReleaseFetcher } from '../../src/modules/repository/ports/release-fetcher.js';
 import type { EventBus } from '../../src/infra/messaging/index.js';
+
+vi.mock('../../src/logger.js', () => ({
+  logger: {
+    info:  vi.fn(),
+    warn:  vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    fatal: vi.fn(),
+  },
+}));
 
 vi.mock('../../src/modules/repository/repository.repository.js', () => ({
   findReposWithConfirmedSubscriptions: vi.fn(),
@@ -21,12 +31,17 @@ vi.mock('../../src/modules/repository/repository.repository.js', () => ({
 
 vi.mock('../../src/metrics.js', () => ({
   scansTotal: { inc: vi.fn() },
+  scanDurationSeconds: { startTimer: vi.fn(() => vi.fn()) },
+  activeSubscriptionsTotal: { set: vi.fn() },
 }));
 
 import {
   findReposWithConfirmedSubscriptions,
   save,
 } from '../../src/modules/repository/repository.repository.js';
+import { logger } from '../../src/logger.js';
+
+const mockLogger = vi.mocked(logger);
 
 const mockGetRepos = vi.mocked(findReposWithConfirmedSubscriptions);
 const mockSave = vi.mocked(save);
@@ -107,13 +122,14 @@ describe('scanOnce', () => {
       makeRepo({ id: 2, repo: 'owner/repo2', last_seen_tag: 'v2.0.0' }),
     ]);
     releases.fetchLatestTag.mockRejectedValue(new AppError(429, 'GitHub rate limit exceeded'));
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await service.scanOnce();
 
     expect(releases.fetchLatestTag).toHaveBeenCalledTimes(1);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('rate limit'));
-    warnSpy.mockRestore();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: 'owner/repo1' }),
+      expect.stringContaining('rate limit'),
+    );
   });
 
   it('logs error and continues scanning remaining repos on non-429 error', async () => {
@@ -125,17 +141,18 @@ describe('scanOnce', () => {
       .mockRejectedValueOnce(new Error('transient network error'))
       .mockResolvedValueOnce(tag('v2.1.0'));
     mockSave.mockResolvedValue(undefined);
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await service.scanOnce();
 
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('owner/repo1'), expect.any(Error));
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: 'owner/repo1' }),
+      expect.stringContaining('owner/repo1'),
+    );
     expect(mockSave.mock.calls[0][0].repo).toBe('owner/repo2');
     expect(publish).toHaveBeenCalledWith(RoutingKeys.ReleasePublished, {
       repo: 'owner/repo2',
       tag: 'v2.1.0',
     });
-    errorSpy.mockRestore();
   });
 
   it('publishes one event per repo regardless of subscriber count', async () => {

@@ -4,7 +4,8 @@ import {
   type SubscriptionRow,
   subscriptionFromRow,
 } from './domain/subscription.js';
-import type { SubscriptionResponse, ConfirmedSubscriber } from '../../types.js';
+import type { SubscriptionResponse } from './interfaces/http/dtos.js';
+import type { ConfirmedSubscriber } from '../notification/ports/subscriber-directory.js';
 
 export async function findByEmailAndRepo(
   email: string,
@@ -36,36 +37,29 @@ export async function findByUnsubscribeToken(token: string): Promise<Subscriptio
   return row ? subscriptionFromRow(row) : null;
 }
 
-type SaveResult = number | undefined;
-
-export async function save(subscription: Subscription): Promise<SaveResult> {
-  if (subscription.id === null) {
-    const result = await pool.query<{ id: number }>(
-      `INSERT INTO subscriptions (email, repo, confirm_token, unsubscribe_token)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id`,
-      [
-        subscription.email,
-        subscription.repo,
-        subscription.confirmToken,
-        subscription.unsubscribeToken,
-      ],
-    );
-    return result.rows[0].id;
-  }
-
+export async function save(subscription: Subscription): Promise<void> {
   await pool.query(
-    'UPDATE subscriptions SET confirmed = $1, confirm_token = $2 WHERE id = $3',
-    [subscription.confirmed, subscription.confirmToken, subscription.id],
+    `INSERT INTO subscriptions (id, email, repo, confirmed, confirm_token, unsubscribe_token, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (id) DO UPDATE SET confirmed = EXCLUDED.confirmed, confirm_token = EXCLUDED.confirm_token`,
+    [
+      subscription.id,
+      subscription.email,
+      subscription.repo,
+      subscription.confirmed,
+      subscription.confirmToken,
+      subscription.unsubscribeToken,
+      subscription.createdAt,
+    ],
   );
   return;
 }
 
-export async function deleteSubscription(id: number): Promise<void> {
+export async function deleteSubscription(id: string): Promise<void> {
   await pool.query('DELETE FROM subscriptions WHERE id = $1', [id]);
 }
 
-export async function findById(id: number): Promise<Subscription | null> {
+export async function findById(id: string): Promise<Subscription | null> {
   const result = await pool.query<SubscriptionRow>(
     'SELECT * FROM subscriptions WHERE id = $1',
     [id],
