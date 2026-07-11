@@ -20,7 +20,7 @@ function toGrpcStatus(status: number): grpc.status {
   }
 }
 
-const verifyRepo: RepoVerificationServiceServer['verifyRepo'] = (call, callback) => {
+export const verifyRepo: RepoVerificationServiceServer['verifyRepo'] = (call, callback) => {
   const repo = call.request.repo?.trim();
   if (!repo) {
     callback({ code: grpc.status.INVALID_ARGUMENT, message: 'repo is required' });

@@ -4,7 +4,7 @@ import type { RepositoryChecker } from '../subscription/ports/repository-checker
 import { RepoVerificationServiceClient } from '../../gen/repo_verification/v1/repo_verification.js';
 
 /** Inverse of the server mapping: gRPC status -> AppError the service expects. */
-function toAppError(err: grpc.ServiceError): AppError {
+export function toAppError(err: grpc.ServiceError): AppError {
   switch (err.code) {
     case grpc.status.NOT_FOUND:          return new AppError(404, 'Repository not found');
     case grpc.status.RESOURCE_EXHAUSTED: return new AppError(429, 'GitHub rate limit exceeded');

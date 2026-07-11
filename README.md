@@ -172,26 +172,30 @@ tests/unit/               # Vitest unit tests
 
 **Redis is optional** — The app starts and runs without a Redis connection. GitHub API responses are fetched fresh on every scan cycle if caching is unavailable.
 
-## gRPC: Repo Verification (REST → gRPC migration)
+## gRPC: Repo Verification (in-process call → gRPC migration)
 
-The repo-existence check the subscription flow runs (`SubscriptionService` →
-GitHub repo lookup) is available over **two interchangeable transports**, selected
-by the `REPO_CHECKER` env var. The old REST path is kept intact; gRPC is added
-alongside.
+The repo-existence check the subscription flow runs — `SubscriptionService`
+(via the `subscription` module) calling into the `github` module's GitHub
+repo lookup — is available over **two interchangeable transports**, selected
+by the `REPO_CHECKER` env var. The two modules previously talked to each other
+via a plain in-process function call (no network, no serialization); gRPC is
+added alongside as a real network hop between the same two modules, without
+removing the original call path.
 
-| | REST (previous) | gRPC (new) |
+| | In-process call (previous) | gRPC (new) |
 |---|---|---|
-| Transport | HTTP/1.1 + JSON | HTTP/2 + Protobuf |
-| Contract | implicit (axios call shape) | explicit `.proto` (`proto/repo_verification/v1/repo_verification.proto`) |
-| Adapter | `createGitHubRepositoryChecker` (axios → GitHub) | `createGrpcRepositoryChecker` (gRPC client → `RepoVerificationService`) |
-| Errors | HTTP status (404 / 429) | gRPC status codes (see below) |
+| Transport | none — direct function call | HTTP/2 + Protobuf |
+| Contract | implicit (`RepositoryChecker.ensureExists` TS interface) | explicit `.proto` (`proto/repo_verification/v1/repo_verification.proto`) |
+| Adapter | `createGitHubRepositoryChecker` (calls `checkRepoExists` in-process) | `createGrpcRepositoryChecker` (gRPC client → `RepoVerificationService`) |
+| Errors | thrown `AppError` (404 / 429 / ...) | gRPC status codes (see below) |
 | Select | `REPO_CHECKER=rest` (default) | `REPO_CHECKER=grpc` |
 
 Both adapters implement the same `RepositoryChecker` port, so the
 `SubscriptionService` is unchanged regardless of transport. Under gRPC, the new
 `RepoVerificationService` server (port `REPO_VERIFICATION_GRPC_PORT`, default
-`50052`) wraps the *same* axios REST call — so REST remains the single source of
-truth and is never duplicated.
+`50052`) wraps the *same* `checkRepoExists` call (which itself makes the actual
+outbound REST call to api.github.com, unchanged on both paths) — so that logic
+remains the single source of truth and is never duplicated.
 
 **Contract** — one unary RPC:
 
@@ -213,9 +217,9 @@ npm run proto:generate   # buf generate --path proto/repo_verification
 
 **Error handling — gRPC status codes** (mapped both ways so behaviour is identical):
 
-| Condition | REST | gRPC status |
+| Condition | AppError status (in-process) | gRPC status |
 |---|---|---|
-| repo exists | 200 | `OK` |
+| repo exists | (no error) | `OK` |
 | repo not found | 404 | `NOT_FOUND` (5) |
 | empty/invalid repo | 400 | `INVALID_ARGUMENT` (3) |
 | GitHub rate limit | 429 | `RESOURCE_EXHAUSTED` (8) |
@@ -223,22 +227,26 @@ npm run proto:generate   # buf generate --path proto/repo_verification
 
 ### Throughput comparison ⭐
 
-Both transports calling the same mock GitHub backend, 50 concurrent workers, 3s,
+Both paths calling the same mock GitHub backend, 50 concurrent workers, 3s,
 local (Node 22, M-series):
 
 | Implementation | req/s |
 |---|---|
-| REST (axios → backend) | ~16,500 |
+| In-process call (direct call → backend) | ~16,500 |
 | gRPC `VerifyRepo` | ~12,800 |
 
-**Why REST is faster here:** this app is a modular monolith. The REST path makes
-one in-process axios call straight to the backend. The gRPC path adds a *hop* —
-client → in-process gRPC server → the same axios call — plus protobuf
-encode/decode. So gRPC measures as pure overhead in this topology.
+**Why the in-process call is faster here:** this app is a modular monolith. The
+in-process path makes one direct function call straight to the backend call. The
+gRPC path adds a *hop* — client → in-process gRPC server → the same direct call
+— plus protobuf encode/decode over a loopback socket. So gRPC measures as pure
+overhead in this topology, which is expected: there was never a network hop
+here to begin with, so gRPC can only add cost, not remove it.
 
-gRPC pays off when it replaces a *genuine cross-process REST hop*: HTTP/2
+gRPC pays off when it replaces a *genuine cross-process call*: HTTP/2
 multiplexes many calls over one connection, protobuf is smaller/faster to parse
-than JSON, and the schema is enforced at compile time. Here the "service" lives
-in the same process, so there is no network hop to amortise those wins against —
-the result is the expected one, and it cleanly illustrates *when* gRPC is worth
-it. Standard tooling for the measurement: `ghz` (gRPC) and `autocannon` (REST).
+than JSON, and the schema is enforced at compile time. Here the two modules
+live in the same process, so there is no pre-existing network hop to amortise
+those wins against — the result is the expected one, and it cleanly illustrates
+*when* gRPC is worth it (replacing a real cross-process REST call, not an
+in-process function call). Standard tooling for the measurement: `ghz` (gRPC)
+and `autocannon` (in-process/HTTP baseline).
