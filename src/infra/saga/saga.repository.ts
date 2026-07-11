@@ -1,5 +1,5 @@
 import { pool } from '../db/pool.js';
-import type { SagaRecord, SagaStepRecord, SagaStatus, StepStatus } from './types.js';
+import { StepStatus, type SagaRecord, type SagaStepRecord, type SagaStatus, type SagaStepKind } from './types.js';
 
 export async function insertSaga(saga: {
   id: string;
@@ -66,7 +66,7 @@ export async function insertSagaStep(step: {
   sagaId: string;
   stepIndex: number;
   stepName: string;
-  stepType: 'forward' | 'compensate';
+  stepType: SagaStepKind;
   status: StepStatus;
 }): Promise<number> {
   const result = await pool.query<{ id: number }>(
@@ -86,9 +86,9 @@ export async function updateSagaStepStatus(
   const sets: string[] = ['status = $2'];
   const params: unknown[] = [id, status];
 
-  if (status === 'IN_PROGRESS') {
+  if (status === StepStatus.InProgress) {
     sets.push('started_at = current_timestamp');
-  } else if (status === 'COMPLETED' || status === 'FAILED') {
+  } else if (status === StepStatus.Completed || status === StepStatus.Failed) {
     sets.push('finished_at = current_timestamp');
   }
   if (error !== undefined) {

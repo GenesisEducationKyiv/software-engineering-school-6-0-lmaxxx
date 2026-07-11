@@ -10,10 +10,9 @@ import {
   reissueConfirmation,
   subscriptionFromRow,
 } from '../../src/modules/subscription/domain/subscription.js';
-import {
-  trackedRepositoryFromRow,
-  applyLatestRelease,
-} from '../../src/modules/repository/domain/tracked-repository.js';
+import { applyLatestRelease } from '../../src/modules/repository/domain/tracked-repository.js';
+import { trackedRepositoryFromRow } from '../../src/modules/repository/tracked-repository.mapper.js';
+import { UUID_REGEX } from '../../src/validators/index.js';
 
 const UUID = '00000000-0000-0000-0000-000000000000';
 
@@ -50,10 +49,10 @@ describe('subscription pure functions', () => {
   const make = () =>
     createSubscription(parseOrThrow(Email, 'user@example.com'), parseOrThrow(RepoSlug, 'owner/repo'));
 
-  it('createSubscription yields an unconfirmed subscription with both tokens and no id', () => {
+  it('createSubscription yields an unconfirmed subscription with both tokens and a generated id', () => {
     const sub = make();
     expect(sub.confirmed).toBe(false);
-    expect(sub.id).toBeNull();
+    expect(sub.id).toMatch(UUID_REGEX);
     expect(sub.confirmToken).toBeTruthy();
     expect(sub.unsubscribeToken).toBeTruthy();
   });
@@ -85,7 +84,7 @@ describe('subscription pure functions', () => {
 
   it('subscriptionFromRow reconstitutes a persisted subscription', () => {
     const sub = subscriptionFromRow({
-      id: 5,
+      id: UUID,
       email: 'user@example.com',
       repo: 'owner/repo',
       confirmed: true,
@@ -93,7 +92,7 @@ describe('subscription pure functions', () => {
       unsubscribe_token: UUID,
       created_at: new Date(),
     });
-    expect(sub.id).toBe(5);
+    expect(sub.id).toBe(UUID);
     expect(sub.confirmed).toBe(true);
     expect(sub.confirmToken).toBeNull();
     expect(sub.unsubscribeToken).toBe(UUID);

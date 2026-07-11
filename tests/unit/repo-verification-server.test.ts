@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as grpc from '@grpc/grpc-js';
-import { verifyRepo } from '../../src/interfaces/repo-verification.server.js';
+import { verifyRepo } from '../../src/modules/repository/interfaces/grpc/repo-verification.server.js';
 import { checkRepoExists } from '../../src/modules/github/github.service.js';
 import { AppError } from '../../src/shared/appError.js';
 

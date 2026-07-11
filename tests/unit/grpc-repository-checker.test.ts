@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as grpc from '@grpc/grpc-js';
-import { toAppError, createGrpcRepositoryChecker } from '../../src/modules/github/grpc-repository-checker.js';
+import { toAppError, createGrpcRepositoryChecker } from '../../src/modules/repository/grpc-repository-checker.js';
 
 type VerifyRepoCallback = (err: grpc.ServiceError | null, response?: { exists: boolean }) => void;
 

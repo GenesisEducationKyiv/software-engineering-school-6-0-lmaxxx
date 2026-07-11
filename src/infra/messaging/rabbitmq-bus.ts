@@ -1,6 +1,6 @@
 import amqp from 'amqplib';
 import type { ChannelModel, Channel } from 'amqplib';
-import { EXCHANGE, type EventPayloads, type RoutingKey } from '../../shared/events.js';
+import { EXCHANGE, type RoutingKey } from '../../shared/events.js';
 import type { EventBus, EventHandler, IncomingEvent } from './types.js';
 
 /**
@@ -22,7 +22,7 @@ export class RabbitMqBus implements EventBus {
     return new RabbitMqBus(connection, channel);
   }
 
-  publish<K extends RoutingKey>(routingKey: K, payload: EventPayloads[K]): Promise<void> {
+  publish(routingKey: string, payload: unknown): Promise<void> {
     const content = Buffer.from(JSON.stringify(payload));
     this.channel.publish(EXCHANGE, routingKey, content, { persistent: true });
     return Promise.resolve();

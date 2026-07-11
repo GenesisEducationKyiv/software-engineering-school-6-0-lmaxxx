@@ -26,6 +26,7 @@ vi.mock('../../src/infra/cache/redis.js', () => ({
 
 vi.mock('../../src/metrics.js', () => ({
   githubApiCallsTotal: { inc: vi.fn() },
+  githubApiDurationSeconds: { startTimer: vi.fn().mockReturnValue(vi.fn()) },
 }));
 
 const mockAxios = vi.mocked(axios);

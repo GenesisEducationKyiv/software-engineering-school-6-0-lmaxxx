@@ -1,11 +1,11 @@
 import * as grpc from '@grpc/grpc-js';
-import { checkRepoExists } from '../modules/github/github.service.js';
-import { AppError } from '../shared/appError.js';
+import { checkRepoExists } from '../../../github/github.service.js';
+import { AppError } from '../../../../shared/appError.js';
 import {
   RepoVerificationServiceService,
   type RepoVerificationServiceServer,
   type VerifyRepoResponse,
-} from '../gen/repo_verification/v1/repo_verification.js';
+} from '../../../../gen/repo_verification/v1/repo_verification.js';
 
 /**
  * Maps an AppError (HTTP-style status) thrown by the REST GitHub client onto the
