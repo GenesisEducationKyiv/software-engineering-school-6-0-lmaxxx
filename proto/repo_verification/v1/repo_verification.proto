@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package repo_verification.v1;
+
+// Internal verification service: confirms a GitHub repository exists.
+// gRPC replacement for the synchronous HTTP REST call SubscriptionService used
+// to make against the GitHub API (see src/modules/github/github.service.ts).
+service RepoVerificationService {
+  // Verifies that the given "owner/name" repository exists.
+  //
+  // Status codes:
+  //   OK                  repo exists (exists = true)
+  //   NOT_FOUND           repo does not exist
+  //   INVALID_ARGUMENT    repo is empty or malformed
+  //   RESOURCE_EXHAUSTED  upstream GitHub rate limit hit
+  //   UNAVAILABLE         upstream GitHub unreachable
+  rpc VerifyRepo(VerifyRepoRequest) returns (VerifyRepoResponse);
+}
+
+message VerifyRepoRequest {
+  // Repository slug in "owner/name" form, e.g. "nodejs/node".
+  string repo = 1;
+}
+
+message VerifyRepoResponse {
+  // Always true on an OK response; absence is signalled via NOT_FOUND status.
+  bool exists = 1;
+}
